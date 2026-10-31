@@ -12,8 +12,26 @@ uv workspace, one package per agent:
 | Package | Framework | What |
 |---|---|---|
 | `packages/sb-support` | PydanticAI + Slack Bolt | Answers @mentions in Slack threads (Socket Mode) |
+| `packages/docs-agent` | PydanticAI | Answers from SB repo markdown docs, with citations and confidence |
 
-More agents (docs, infra, change, ticket, triage) land as sibling packages.
+More agents (infra, change, ticket, triage) land as sibling packages.
+
+## docs-agent
+
+Searches git-tracked `*.md` in sibling repos under `$DOCS_AGENT_ROOT` (default
+`~/gitrepos`); the repo list is `DEFAULT_REPOS` in `corpus.py`. Retrieval is BM25
+keyword search over heading-level sections behind a `Retriever` protocol (qmd
+backend: SB-1483). The agent must search before answering and may only cite real
+corpus files; both are enforced by an output validator.
+
+```bash
+op run --env-file=.env.op -- uv run docs-agent ask -v "How do I deploy missing-table?"
+op run --env-file=.env.op -- uv run docs-agent eval   # 13 cases, real model, exits 1 below 80%
+```
+
+Evals use `pydantic-evals`: cited-expected-source, low confidence on unanswerable
+questions, and an LLM judge (`DOCS_AGENT_JUDGE_MODEL`, default Sonnet) against a
+reference answer. They call the real model, so they are not in CI.
 
 ## Run locally
 

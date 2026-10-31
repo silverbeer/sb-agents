@@ -1,0 +1,16 @@
+[project]
+name = "docs-agent"
+version = "0.1.0"
+description = "Specialist agent that answers questions from SB repo docs"
+requires-python = ">=3.13"
+dependencies = [
+    "pydantic-ai-slim[anthropic]>=2.64",
+    "pydantic-evals>=2.64",
+]
+
+[project.scripts]
+docs-agent = "docs_agent.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
