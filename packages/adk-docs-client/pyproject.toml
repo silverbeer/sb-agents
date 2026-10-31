@@ -1,0 +1,16 @@
+[project]
+name = "adk-docs-client"
+version = "0.1.0"
+description = "Minimal ADK agent that delegates docs questions to docs-agent over A2A"
+requires-python = ">=3.13"
+dependencies = [
+    "google-adk[a2a]>=2.13",
+    "anthropic>=0.78",
+]
+
+[project.scripts]
+adk-docs-client = "adk_docs_client.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

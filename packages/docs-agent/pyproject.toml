@@ -6,10 +6,13 @@ requires-python = ">=3.13"
 dependencies = [
     "pydantic-ai-slim[anthropic]>=2.64",
     "pydantic-evals>=2.64",
+    "fasta2a[pydantic-ai]>=2.1",
+    "uvicorn>=0.30",
 ]
 
 [project.scripts]
 docs-agent = "docs_agent.cli:main"
+docs-agent-a2a = "docs_agent.a2a_server:main"
 
 [build-system]
 requires = ["hatchling"]
