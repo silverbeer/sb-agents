@@ -12,7 +12,8 @@ uv workspace, one package per agent:
 | Package | Framework | What |
 |---|---|---|
 | `packages/sb-support` | PydanticAI + Slack Bolt | Answers @mentions in Slack threads (Socket Mode) |
-| `packages/docs-agent` | PydanticAI | Answers from SB repo markdown docs, with citations and confidence |
+| `packages/docs-agent` | PydanticAI + fasta2a | Answers from SB repo markdown docs, with citations and confidence; served over A2A |
+| `packages/adk-docs-client` | ADK | Router `LlmAgent` that delegates docs questions to docs-agent via `RemoteA2aAgent` |
 
 More agents (infra, change, ticket, triage) land as sibling packages.
 
@@ -52,6 +53,15 @@ while working, replies in thread, then ✅ (or ❌ on failure).
 | `SLACK_APP_TOKEN` | `op://agents/sb-slack/app-token` (`xapp-`, scope `connections:write`) |
 | `ANTHROPIC_API_KEY` | `op://agents/anthropic_key/password` |
 | `SB_SUPPORT_MODEL` | optional, default `anthropic:claude-haiku-5-5` |
+
+## A2A hop (ADK → docs-agent)
+
+```bash
+op run --env-file=.env.op -- uv run docs-agent-a2a          # :8101, card at /.well-known/agent-card.json
+op run --env-file=.env.op -- uv run adk-docs-client "How do I release the Android app?"
+```
+
+What broke and why: [docs/notes/a2a-first-hop.md](docs/notes/a2a-first-hop.md).
 
 ## Develop
 
