@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import os
 import sys
 import time
 
@@ -51,8 +52,14 @@ def main() -> None:
     ask = sub.add_parser("ask", help="answer a question from SB docs")
     ask.add_argument("question")
     ask.add_argument("-v", "--verbose", action="store_true", help="show tool calls")
-    sub.add_parser("eval", help="run the eval set against the real model")
+    ev = sub.add_parser("eval", help="run the eval set against the real model")
+    ev.add_argument(
+        "--model",
+        help="agent model, e.g. ollama:gemma4:12b or openrouter:<id> (default: DOCS_AGENT_MODEL)",
+    )
     args = parser.parse_args()
+    if args.cmd == "eval" and args.model:
+        os.environ["DOCS_AGENT_MODEL"] = args.model
     setup_telemetry("docs-agent")
 
     if args.cmd == "ask":

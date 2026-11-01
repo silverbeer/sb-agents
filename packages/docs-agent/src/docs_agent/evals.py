@@ -283,7 +283,8 @@ async def run_evals(retriever: Retriever | None = None, corpus: Corpus | None = 
     print("per evaluator: " + ", ".join(f"{k} {v:.0%}" for k, v in scores.items()))
     cost = record.cost_usd
     print(f"cost: ${cost:.4f}" if cost is not None else "cost: unknown", end="")
-    print(f" (agent ${record.agent_cost_usd or 0:.4f}, judge ${judge.cost_usd or 0:.4f})")
+    agent_cost = "unpriced" if record.agent_cost_usd is None else f"${record.agent_cost_usd:.4f}"
+    print(f" (agent {agent_cost}, judge ${judge.cost_usd or 0:.4f})")
     for f in report.failures:
         print(f"  ERROR {f.name}: {f.error_message}")
     return rate
