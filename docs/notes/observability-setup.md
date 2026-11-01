@@ -196,3 +196,24 @@ fired 4.5 min after the stop (3m absence + 1m pending).
   with the integration's settings in the body.
 - These alerts are sb-triage's input (SB-1475): the agents' own failures are the
   first thing the triage agent gets to triage.
+
+## Eval scores as a metric (SB-1488)
+
+`make eval` runs the 13-case docs-agent suite against the real model, then emits one
+`EvalRecord`: a log line (`event=eval_run`, `pass_rate`, `score_<evaluator>`,
+`agent_cost_usd`, `judge_cost_usd`, `cost_usd`, `duration_s`), the gauges
+`sb_eval_pass_rate` / `sb_eval_score{evaluator}`, and an `sb_eval_cost_usd` counter.
+The dashboard plots pass rate (80% threshold line) and eval cost; the alert
+*docs-agent eval below threshold* fires when the latest run in 7 days is under 0.8.
+
+**Measured, 2026-11-01:** 13/13 passed (Calibrated, CitedExpectedSource and LLMJudge
+all 100%). **$0.069 per run: agent $0.023, Sonnet judge $0.046.** The judge is two
+thirds of the cost, so a cheaper judge is the first lever if evals run often; the judge
+model must stay fixed across runs or scores stop being comparable (SB-1490).
+
+- pydantic-evals reports no cost, so the judge is wrapped in `PricedModel` (a PydanticAI
+  `WrapperModel` that prices each request with genai-prices), and the agent's cost
+  comes from each run's `usage.cost`.
+- Alert fired on purpose with a synthetic record (`suite=alert-test`, pass_rate 0.5,
+  no LLM calls) and delivered to `#sb-alerts`.
+- On demand only. A weekly schedule needs somewhere that is always on (open question).

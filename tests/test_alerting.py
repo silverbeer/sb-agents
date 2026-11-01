@@ -10,7 +10,12 @@ from pathlib import Path
 import yaml
 
 FILE = Path(__file__).parents[1] / "observability/grafana/provisioning/sb-agents-alerting.yaml"
-DEFAULTS = {"ALERT_FAILED_RUNS": "1", "ALERT_P95_MS": "20000", "ALERT_DAILY_USD": "1"}
+DEFAULTS = {
+    "ALERT_FAILED_RUNS": "1",
+    "ALERT_P95_MS": "20000",
+    "ALERT_DAILY_USD": "1",
+    "ALERT_EVAL_PASS": "0.8",
+}
 
 
 def rendered() -> dict:
@@ -35,6 +40,7 @@ def test_rules_parse_with_numeric_thresholds() -> None:
         "sb-agent-latency",
         "sb-agent-daily-spend",
         "sb-docs-agent-down",
+        "sb-eval-score-drop",
     }
     for rule in rules.values():
         [threshold] = [d for d in rule["data"] if d["refId"] == rule["condition"]]

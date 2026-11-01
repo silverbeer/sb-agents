@@ -29,6 +29,7 @@ corpus files; both are enforced by an output validator.
 ```bash
 op run --env-file=.env.op -- uv run docs-agent ask -v "How do I deploy missing-table?"
 op run --env-file=.env.op -- uv run docs-agent eval   # 13 cases, real model, exits 1 below 80%
+make eval                                             # same, exporting the score to Grafana (~$0.07)
 ```
 
 Evals use `pydantic-evals`: cited-expected-source, low confidence on unanswerable
@@ -81,9 +82,9 @@ Dashboards are code: edit `observability/grafana/build_dashboards.py`, run `make
 and Grafana picks up the JSON (folder *sb-agents*). Cost and run panels read the run
 records in Loki; latency panels use Tempo span metrics and the service graph.
 
-Alerts (failing runs, p95, daily spend, docs-agent down) post to `#sb-alerts`.
+Alerts (failing runs, p95, daily spend, docs-agent down, eval below 80%) post to `#sb-alerts`.
 `make obs-up` needs `op` for the Slack token; thresholds are make variables
-(`ALERT_DAILY_USD`, `ALERT_P95_MS`, `ALERT_FAILED_RUNS`).
+(`ALERT_DAILY_USD`, `ALERT_P95_MS`, `ALERT_FAILED_RUNS`, `ALERT_EVAL_PASS`).
 
 | Env | Effect |
 |---|---|

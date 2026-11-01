@@ -10,13 +10,19 @@ when at least PASS_THRESHOLD of cases pass.
 from __future__ import annotations
 
 import os
+import time
 from dataclasses import dataclass, field
+from typing import Any
 
+from pydantic_ai.models import Model, infer_model
+from pydantic_ai.models.wrapper import WrapperModel
 from pydantic_evals import Case, Dataset
 from pydantic_evals.evaluators import Evaluator, EvaluatorContext, LLMJudge
+from pydantic_evals.reporting import EvaluationReport
 
 from docs_agent.agent import Deps, DocsAnswer, WithDeps, build_agent
 from docs_agent.corpus import Corpus, KeywordRetriever, Retriever
+from sb_obs import EvalRecord, emit_eval, model_name, price
 
 PASS_THRESHOLD = 0.8
 JUDGE_MODEL = os.environ.get("DOCS_AGENT_JUDGE_MODEL", "anthropic:claude-sonnet-5-5")
@@ -167,7 +173,43 @@ class Calibrated(Evaluator[str, DocsAnswer, Meta]):
         return ctx.output.confidence == "low"
 
 
-def build_dataset() -> Dataset[str, DocsAnswer, Meta]:
+class PricedModel(WrapperModel):
+    """Wraps the judge model and prices each request (pydantic-evals reports no cost)."""
+
+    def __init__(self, wrapped: Model | str) -> None:
+        super().__init__(infer_model(wrapped) if isinstance(wrapped, str) else wrapped)
+        self.cost_usd: float | None = None
+        self.requests = 0
+
+    async def request(self, messages: Any, model_settings: Any, params: Any) -> Any:
+        response = await super().request(messages, model_settings, params)
+        u = response.usage
+        cost = price(
+            self.model_name,
+            input_tokens=u.input_tokens,
+            output_tokens=u.output_tokens,
+            cache_read_tokens=u.cache_read_tokens,
+            cache_write_tokens=u.cache_write_tokens,
+        )
+        self.requests += 1
+        if cost is not None:
+            self.cost_usd = (self.cost_usd or 0.0) + cost
+        return response
+
+
+def summarize(report: EvaluationReport) -> tuple[int, int, dict[str, float]]:
+    """(cases passed, total cases, fraction passed per assertion name)."""
+    passed = sum(1 for c in report.cases if all(a.value for a in c.assertions.values()))
+    total = len(report.cases) + len(report.failures)
+    results: dict[str, list[bool]] = {}
+    for case in report.cases:
+        for name, assertion in case.assertions.items():
+            results.setdefault(name, []).append(bool(assertion.value))
+    scores = {name: sum(vals) / len(vals) for name, vals in sorted(results.items())}
+    return passed, total, scores
+
+
+def build_dataset(judge: Model | str | None = None) -> Dataset[str, DocsAnswer, Meta]:
     return Dataset(
         name="docs-agent",
         cases=CASES,
@@ -180,7 +222,7 @@ def build_dataset() -> Dataset[str, DocsAnswer, Meta]:
                     "its key facts and does not contradict it. Extra correct detail is fine. "
                     "For an unanswerable question, the answer must say the docs don't cover it."
                 ),
-                model=JUDGE_MODEL,
+                model=judge or JUDGE_MODEL,
                 include_input=True,
                 include_expected_output=True,
             ),
@@ -194,22 +236,45 @@ def check_sources(corpus: Corpus) -> list[str]:
 
 
 async def run_evals(retriever: Retriever | None = None, corpus: Corpus | None = None) -> float:
+    """Run the eval set against the real model; print the report and emit an EvalRecord."""
     corpus = corpus or Corpus.load()
     if missing := check_sources(corpus):
         raise SystemExit(f"eval references files not in the corpus: {missing}")
     deps = Deps(corpus, retriever or KeywordRetriever(corpus))
     agent = WithDeps(build_agent(), deps, caller="eval")
+    judge = PricedModel(JUDGE_MODEL)
+    agent_cost: list[float] = []
 
     async def answer(question: str) -> DocsAnswer:
-        return (await agent.run(question)).output
+        result = await agent.run(question)
+        if result.usage.cost is not None:
+            agent_cost.append(float(result.usage.cost))
+        return result.output
 
-    report = await build_dataset().evaluate(answer, max_concurrency=4, progress=False)
+    start = time.perf_counter()
+    report = await build_dataset(judge).evaluate(answer, max_concurrency=4, progress=False)
     report.print(include_input=False, include_output=False, include_durations=True)
 
-    passed = sum(1 for c in report.cases if all(a.value for a in c.assertions.values()))
-    total = len(report.cases) + len(report.failures)
+    passed, total, scores = summarize(report)
     rate = passed / total if total else 0.0
+    record = EvalRecord(
+        suite="docs-agent",
+        model=model_name(agent.wrapped.model),
+        judge_model=judge.model_name,
+        cases=total,
+        passed=passed,
+        pass_rate=rate,
+        scores=scores,
+        agent_cost_usd=sum(agent_cost) if agent_cost else None,
+        judge_cost_usd=judge.cost_usd,
+        duration_s=round(time.perf_counter() - start, 1),
+    )
+    emit_eval(record)
     print(f"\n{passed}/{total} cases passed ({rate:.0%}); threshold {PASS_THRESHOLD:.0%}")
+    print("per evaluator: " + ", ".join(f"{k} {v:.0%}" for k, v in scores.items()))
+    cost = record.cost_usd
+    print(f"cost: ${cost:.4f}" if cost is not None else "cost: unknown", end="")
+    print(f" (agent ${record.agent_cost_usd or 0:.4f}, judge ${judge.cost_usd or 0:.4f})")
     for f in report.failures:
         print(f"  ERROR {f.name}: {f.error_message}")
     return rate

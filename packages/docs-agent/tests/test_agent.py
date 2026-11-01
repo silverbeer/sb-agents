@@ -98,3 +98,25 @@ def test_default_usage_limits_are_set() -> None:
     from docs_agent.agent import USAGE_LIMITS
 
     assert USAGE_LIMITS.request_limit and USAGE_LIMITS.cost_limit
+
+
+# --- eval summary + cost tracking (SB-1488) ------------------------------------------
+
+
+async def test_eval_summary_and_judge_wrapper_offline() -> None:
+    from docs_agent.agent import DocsAnswer
+    from docs_agent.evals import PricedModel, build_dataset, summarize
+
+    judge = PricedModel(TestModel())  # TestModel isn't priced: cost stays unknown
+
+    async def answer(question: str) -> DocsAnswer:
+        return DocsAnswer(answer="dunno", sources=[], confidence="low")
+
+    report = await build_dataset(judge).evaluate(answer, max_concurrency=4, progress=False)
+    passed, total, scores = summarize(report)
+
+    assert total == len(report.cases) == 13
+    assert 0 <= passed <= total
+    assert {"Calibrated", "LLMJudge"} <= set(scores)
+    assert scores["Calibrated"] == 1.0  # every answer is low confidence
+    assert judge.requests == 13 and judge.cost_usd is None

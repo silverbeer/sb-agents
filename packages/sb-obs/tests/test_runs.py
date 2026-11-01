@@ -93,3 +93,32 @@ def test_unknown_model_price_is_none() -> None:
 def test_model_name() -> None:
     assert model_name("anthropic:claude-haiku-5-5") == "claude-haiku-5-5"
     assert model_name(SimpleNamespace(model_name="claude-sonnet-5-5")) == "claude-sonnet-5-5"
+
+
+def test_emit_eval_logs_flat_scores_and_total_cost(caplog: pytest.LogCaptureFixture) -> None:
+    from sb_obs.runs import EvalRecord, emit_eval
+
+    record = EvalRecord(
+        suite="docs-agent",
+        model="claude-haiku-5-5",
+        judge_model="claude-sonnet-5-5",
+        cases=13,
+        passed=12,
+        pass_rate=12 / 13,
+        scores={"LLMJudge": 0.9, "Calibrated": 1.0},
+        agent_cost_usd=0.02,
+        judge_cost_usd=0.05,
+    )
+    with caplog.at_level("INFO", logger="sb_obs.runs"):
+        emit_eval(record)
+    [entry] = caplog.records
+    assert entry.event == "eval_run"
+    assert entry.score_LLMJudge == 0.9
+    assert entry.cost_usd == pytest.approx(0.07)
+
+
+def test_eval_cost_unknown_when_nothing_priced() -> None:
+    from sb_obs.runs import EvalRecord
+
+    rec = EvalRecord(suite="s", model="m", judge_model="j", cases=1, passed=1, pass_rate=1.0)
+    assert rec.cost_usd is None
