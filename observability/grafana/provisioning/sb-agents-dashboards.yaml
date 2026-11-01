@@ -1,0 +1,9 @@
+# Mounted into grafana/otel-lgtm by `make obs-up`.
+apiVersion: 1
+providers:
+  - name: sb-agents
+    folder: sb-agents
+    type: file
+    allowUiUpdates: false
+    options:
+      path: /sb-agents/dashboards

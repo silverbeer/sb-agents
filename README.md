@@ -77,6 +77,10 @@ make support                                  # Slack bot, exporting (needs docs
 make obs-down
 ```
 
+Dashboards are code: edit `observability/grafana/build_dashboards.py`, run `make dashboards`,
+and Grafana picks up the JSON (folder *sb-agents*). Cost and run panels read the run
+records in Loki; latency panels use Tempo span metrics and the service graph.
+
 | Env | Effect |
 |---|---|
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | export over OTLP/HTTP; unset = no export (tests, CI). `make` sets `http://localhost:4318` |

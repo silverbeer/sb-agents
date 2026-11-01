@@ -135,3 +135,30 @@ On the server, `instrument_asgi` (ASGI middleware) continues the incoming trace.
 
 The `ask_docs` tool is the minimal version of SB-1476's routing: one specialist,
 no thread history, no escalation.
+
+## Dashboards (SB-1486)
+
+`observability/grafana/build_dashboards.py` generates `dashboards/agent-overview.json`,
+provisioned into otel-lgtm by `make obs-up` (folder *sb-agents*). A test fails if the
+committed JSON is stale.
+
+**Where each panel's data comes from, and why:**
+
+- **Runs, spend, $/run, error rate, tokens, run p95: run records in Loki** (`sum_over_time
+  (... | unwrap cost_usd [...])`). Prometheus counters from short-lived CLI processes
+  show up once, already at their final value, so `rate()`/`increase()` never count them.
+  Each record is its own row, so these totals are exact. At work this is the BigQuery query.
+- **LLM call latency: Tempo span metrics** (`traces_spanmetrics_latency`, by `span_name`
+  `chat <model>` / `generate_content <model>`). ADK emits
+  `gen_ai.client.operation.duration`; PydanticAI 2.64 only emits token usage. Span
+  metrics give one latency source for both frameworks.
+- **A2A edges: Tempo service graph** (`traces_service_graph_request_total{client,server}`),
+  built from client/server span pairs. `adk-docs-client -> docs-agent` and
+  `sb-support -> docs-agent` showed up on their own once propagation worked.
+- **Log → trace:** otel-lgtm's Loki datasource already links the `trace_id` field to Tempo.
+
+Gotcha: an OTel counter with `unit="USD"` became `sb_agent_cost_usd_USD_total`; the
+Prometheus translation appends the unit. The counter now has no unit.
+
+Not built: the optional SQL panel (run records in SQLite/Postgres). Loki's `unwrap`
+covered the same "aggregate the rows" practice without another store.
