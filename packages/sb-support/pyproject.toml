@@ -4,6 +4,7 @@ version = "0.1.0"
 description = "Slack support agent for #sb-support (PydanticAI + Slack Bolt, Socket Mode)"
 requires-python = ">=3.13"
 dependencies = [
+    "sb-obs",
     "pydantic-ai-slim[anthropic]>=2.64",
     "slack-bolt>=1.30",
     "aiohttp>=3.10",
@@ -11,6 +12,9 @@ dependencies = [
 
 [project.scripts]
 sb-support = "sb_support.app:main"
+
+[tool.uv.sources]
+sb-obs = { workspace = true }
 
 [build-system]
 requires = ["hatchling"]

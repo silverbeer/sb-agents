@@ -1,0 +1,16 @@
+[project]
+name = "sb-obs"
+version = "0.1.0"
+description = "Shared telemetry for SB agents: OTel traces/metrics/logs, GCP-format JSON logs"
+requires-python = ">=3.13"
+dependencies = [
+    "opentelemetry-sdk>=1.44",
+    "opentelemetry-exporter-otlp-proto-http>=1.44",
+    "opentelemetry-instrumentation-httpx>=0.65b0",
+    "opentelemetry-instrumentation-asgi>=0.65b0",
+    "opentelemetry-instrumentation-logging>=0.65b0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

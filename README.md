@@ -14,6 +14,7 @@ uv workspace, one package per agent:
 | `packages/sb-support` | PydanticAI + Slack Bolt | Answers @mentions in Slack threads (Socket Mode) |
 | `packages/docs-agent` | PydanticAI + fasta2a | Answers from SB repo markdown docs, with citations and confidence; served over A2A |
 | `packages/adk-docs-client` | ADK | Router `LlmAgent` that delegates docs questions to docs-agent via `RemoteA2aAgent` |
+| `packages/sb-obs` | OpenTelemetry | Shared `setup_telemetry(service)`: traces, metrics, GCP-format JSON logs |
 
 More agents (infra, change, ticket, triage) land as sibling packages.
 
@@ -63,11 +64,34 @@ op run --env-file=.env.op -- uv run adk-docs-client "How do I release the Androi
 
 What broke and why: [docs/notes/a2a-first-hop.md](docs/notes/a2a-first-hop.md).
 
+## Observability
+
+Every entry point calls `sb_obs.setup_telemetry("<service>")`. Local backend is
+`grafana/otel-lgtm` (Collector, Tempo, Loki, Prometheus, Grafana in one container, $0):
+
+```bash
+make obs-up                                   # Grafana http://localhost:3000 (admin/admin)
+make docs-a2a                                 # docs-agent A2A server, exporting
+make adk-ask Q="How do I install janitor?"    # one trace across router -> A2A -> docs-agent
+make support                                  # Slack bot, exporting
+make obs-down
+```
+
+| Env | Effect |
+|---|---|
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | export over OTLP/HTTP; unset = no export (tests, CI). `make` sets `http://localhost:4318` |
+| `SB_OBS_CAPTURE_CONTENT` | `1` = prompts/answers in spans. Default off; `make` targets turn it on locally |
+| `SB_OBS_LOG_FORMAT` | `json` (Cloud Logging shape, stderr) or `text` |
+| `SB_OBS_GCP_PROJECT` | full `projects/<p>/traces/<id>` trace names in logs |
+| `SB_ENV` | `deployment.environment.name`, default `local` |
+
+What each framework emits, and the gotchas: [docs/notes/observability-setup.md](docs/notes/observability-setup.md).
+
 ## Develop
 
 ```bash
-uv run pytest -q
-uv run ruff check . && uv run ruff format --check .
+make test
+make lint
 ```
 
 Tests use PydanticAI's `TestModel` and a fake Slack client: no network, no tokens.
