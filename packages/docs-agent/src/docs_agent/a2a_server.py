@@ -9,8 +9,6 @@ from __future__ import annotations
 
 import logging
 import os
-from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from functools import partial
@@ -22,9 +20,8 @@ from fasta2a.pydantic_ai import AgentWorker, worker_lifespan
 from fasta2a.schema import Artifact, Message, Part, Skill, Task, TaskSendParams, TaskState
 from fasta2a.storage import InMemoryStorage
 from pydantic_ai import Agent
-from pydantic_ai.agent import WrapperAgent
 
-from docs_agent.agent import Deps, DocsAnswer, build_agent
+from docs_agent.agent import Deps, DocsAnswer, WithDeps, build_agent
 from docs_agent.corpus import Corpus, KeywordRetriever
 from sb_obs import instrument_asgi, setup_telemetry
 
@@ -133,25 +130,6 @@ class SpecAgentWorker(AgentWorker):
         if isinstance(result, DocsAnswer):
             artifacts[0]["parts"].insert(0, Part(text=render_text(result)))
         return artifacts
-
-
-class WithDeps(WrapperAgent[Deps, DocsAnswer]):
-    """Inject fixed deps into every run.
-
-    fasta2a's worker calls `agent.run(message_history=...)` without deps, and
-    `run()` goes through `iter()`, so overriding `iter()` covers both.
-    """
-
-    def __init__(self, wrapped: Agent[Deps, DocsAnswer], deps: Deps) -> None:
-        super().__init__(wrapped)
-        self._deps = deps
-
-    @asynccontextmanager
-    async def iter(self, user_prompt: Any = None, **kwargs: Any) -> AsyncIterator[Any]:
-        if kwargs.get("deps") is None:
-            kwargs["deps"] = self._deps
-        async with self.wrapped.iter(user_prompt, **kwargs) as run:
-            yield run
 
 
 def build_app(

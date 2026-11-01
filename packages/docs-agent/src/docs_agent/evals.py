@@ -15,7 +15,7 @@ from dataclasses import dataclass, field
 from pydantic_evals import Case, Dataset
 from pydantic_evals.evaluators import Evaluator, EvaluatorContext, LLMJudge
 
-from docs_agent.agent import Deps, DocsAnswer, build_agent
+from docs_agent.agent import Deps, DocsAnswer, WithDeps, build_agent
 from docs_agent.corpus import Corpus, KeywordRetriever, Retriever
 
 PASS_THRESHOLD = 0.8
@@ -198,10 +198,10 @@ async def run_evals(retriever: Retriever | None = None, corpus: Corpus | None = 
     if missing := check_sources(corpus):
         raise SystemExit(f"eval references files not in the corpus: {missing}")
     deps = Deps(corpus, retriever or KeywordRetriever(corpus))
-    agent = build_agent()
+    agent = WithDeps(build_agent(), deps, caller="eval")
 
     async def answer(question: str) -> DocsAnswer:
-        return (await agent.run(question, deps=deps)).output
+        return (await agent.run(question)).output
 
     report = await build_dataset().evaluate(answer, max_concurrency=4, progress=False)
     report.print(include_input=False, include_output=False, include_durations=True)

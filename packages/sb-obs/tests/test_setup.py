@@ -28,6 +28,9 @@ SCRIPT = textwrap.dedent(
         return "SECRET-ANSWER"
 
     agent.run_sync("SECRET-QUESTION")
+    from sb_obs import track_run
+    with track_run("probe", caller="test", model="test") as run:
+        run.add_usage(requests=1, cost_usd=0.001)
     t.shutdown()
     done = spans.get_finished_spans()
     names = [s.name for s in done]
@@ -63,6 +66,10 @@ def test_agent_spans_metrics_and_correlated_logs_without_content() -> None:
     # OTel gen_ai semantic-convention span names
     assert {"invoke_agent probe", "execute_tool lookup", "chat test"} <= set(out["names"])
     assert "gen_ai.client.token.usage" in out["metrics"]
+    assert {"sb_agent_runs", "sb_agent_cost_usd", "sb_agent_run_duration"} <= set(out["metrics"])
+    record = next(entry for entry in logs if entry.get("event") == "agent_run")
+    assert (record["agent"], record["outcome"], record["cost_usd"]) == ("probe", "ok", 0.001)
+    assert record["trace_id"] == record["logging.googleapis.com/trace"]
     assert out["content"] is False
     assert out["adk"] == "false"
     assert out["exporting"] is False

@@ -7,11 +7,12 @@ import re
 from typing import Any
 
 from pydantic_ai import Agent
+from pydantic_ai.exceptions import UsageLimitExceeded
 from slack_bolt.adapter.socket_mode.async_handler import AsyncSocketModeHandler
 from slack_bolt.async_app import AsyncApp
 
-from sb_obs import setup_telemetry
-from sb_support.agent import build_agent
+from sb_obs import model_name, setup_telemetry, track_run
+from sb_support.agent import USAGE_LIMITS, build_agent
 
 log = logging.getLogger("sb_support")
 
@@ -36,6 +37,18 @@ async def _react(client: Any, channel: str, ts: str, name: str, *, remove: bool 
         log.warning("reaction %s %s failed", "remove" if remove else "add", name, exc_info=True)
 
 
+async def answer(agent: Agent[None, str], question: str) -> str:
+    """Run under usage limits and emit a RunRecord. A hit limit becomes a reply, not a crash."""
+    with track_run("sb-support", caller="slack", model=model_name(agent.model)) as run:
+        try:
+            result = await agent.run(question, usage_limits=USAGE_LIMITS)
+        except UsageLimitExceeded:
+            log.warning("usage limit hit answering %r", question[:80])
+            raise
+        run.record_usage(result.usage)
+        return result.output
+
+
 async def handle_mention(event: dict[str, Any], client: Any, agent: Agent[None, str]) -> None:
     """Answer an app_mention in its thread, with 👀 while working and ✅/❌ when done."""
     channel, ts = event["channel"], event["ts"]
@@ -47,9 +60,16 @@ async def handle_mention(event: dict[str, Any], client: Any, agent: Agent[None, 
         if not question:
             reply = "Hi! Mention me with a question and I'll answer in this thread."
         else:
-            reply = (await agent.run(question)).output
+            reply = await answer(agent, question)
         await client.chat_postMessage(channel=channel, thread_ts=thread_ts, text=reply)
         outcome = DONE
+    except UsageLimitExceeded:
+        outcome = FAILED
+        await client.chat_postMessage(
+            channel=channel,
+            thread_ts=thread_ts,
+            text="That one needed more work than I'm allowed per question. Try narrowing it down.",
+        )
     except Exception:
         log.exception("failed to answer mention in %s at %s", channel, ts)
         outcome = FAILED

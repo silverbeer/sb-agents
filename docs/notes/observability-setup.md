@@ -69,3 +69,39 @@ caching (SB-1484) targets that growth.
 3. A custom sink is an OTel `SpanProcessor` / `MetricReader` / `logging.Handler`
    passed to `setup_telemetry`. Agent code stays untouched.
 4. Decide content capture deliberately; never inherit the framework defaults.
+
+## Run records and cost (SB-1484)
+
+Every agent run emits one `RunRecord` (`sb_obs.track_run`): a JSON log line with
+`event=agent_run`, the metrics `sb_agent_runs` / `sb_agent_cost_usd` /
+`sb_agent_run_duration`, and `sb.run.*` attributes on an `agent_run <agent>` span
+wrapping the framework spans. Fields: run_id, trace_id, agent, caller, model,
+outcome (ok / error / limit), requests, tool_calls, input/output/cache tokens,
+cost_usd, latency_ms, confidence, error. This is the row work would land in BigQuery.
+
+- **Cost source: `genai-prices`, not a hand-kept table.** PydanticAI fills
+  `usage.cost` from it; ADK runs are priced with `sb_obs.price()`. It handles
+  Haiku 5.5's tiered pricing (prompts over 100K cost 5x) per request.
+  `tests/test_runs.py` pins the expected prices, so a price change fails CI.
+  `cost_usd` is `None` (not 0) when a model isn't priced, e.g. local Ollama.
+- **Caps:** docs-agent `UsageLimits(request_limit=8, tool_calls_limit=12,
+  total_tokens_limit=60_000, cost_limit=$0.02)`; sb-support
+  `(request_limit=3, total_tokens_limit=20_000, cost_limit=$0.01)`; ADK router
+  `RunConfig(max_llm_calls=4)`. A hit limit is outcome `limit`, and sb-support
+  replies "needed more work than I'm allowed" instead of the generic error.
+- **Measured:** one docs question = 4 requests, 4 tool calls, 15.4k in / 0.7k out,
+  **$0.0019** on Haiku, ~4.6 s.
+
+### Prompt caching: tried, left off
+
+A/B on one question with `anthropic_cache=True` (automatic, moving breakpoint):
+
+| | requests | input tokens | cache write | cache read | cost |
+|---|---|---|---|---|---|
+| off | 4 | 15,344 | 0 | 0 | $0.00186 |
+| on | 6 | 42,757 | 10,640 | 32,103 | $0.00218 |
+
+Per request, caching was ~21% cheaper ($0.00036 vs $0.00046), but the run took
+two extra requests (model nondeterminism) and cache writes cost 1.25x, so the run
+cost more. At ~4 short requests per question the write premium roughly cancels
+the read discount. Revisit when Slack threads become multi-turn or prompts grow.
