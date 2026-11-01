@@ -1,0 +1,145 @@
+# Grafana-managed alerting for sb-agents, mounted into grafana/otel-lgtm by `make obs-up`.
+# ${ALERT_*} thresholds are substituted by `make obs-up`; ${SLACK_BOT_TOKEN} is expanded by
+# Grafana from the container environment.
+# These alerts are also the future input for sb-triage (SB-1475).
+apiVersion: 1
+
+contactPoints:
+  - orgId: 1
+    name: sb-alerts-slack
+    receivers:
+      - uid: sb-alerts-slack
+        type: slack
+        settings:
+          recipient: "#sb-alerts"
+          token: ${SLACK_BOT_TOKEN}
+          username: sb-agent
+          title: '{{ template "slack.default.title" . }}'
+          text: '{{ template "slack.default.text" . }}'
+
+policies:
+  - orgId: 1
+    receiver: sb-alerts-slack
+    group_by: ["grafana_folder", "alertname"]
+    group_wait: 30s
+    group_interval: 5m
+    repeat_interval: 4h
+
+groups:
+  - orgId: 1
+    name: sb-agents
+    folder: sb-agents
+    interval: 1m
+    rules:
+      - uid: sb-agent-failures
+        title: Agent runs failing
+        condition: C
+        for: 0s
+        noDataState: OK
+        execErrState: Error
+        labels: {team: sb-agents, signal: errors}
+        annotations:
+          summary: "Agent runs ended in error or hit a usage limit (last 15m)."
+          runbook: "Dashboard sb-agents: overview & cost > Expensive or failed runs; follow trace_id."
+        data:
+          - refId: A
+            datasourceUid: loki
+            relativeTimeRange: {from: 900, to: 0}
+            model:
+              refId: A
+              queryType: instant
+              expr: 'sum(count_over_time({service_namespace="sb-agents"} | event="agent_run" | outcome != "ok" [15m]))'
+          - refId: B
+            datasourceUid: __expr__
+            model: {refId: B, type: reduce, expression: A, reducer: last}
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions: [{evaluator: {type: gt, params: [${ALERT_FAILED_RUNS}]}}]
+
+      - uid: sb-agent-latency
+        title: Agent run latency p95 high
+        condition: C
+        for: 0s
+        noDataState: OK
+        execErrState: Error
+        labels: {team: sb-agents, signal: latency}
+        annotations:
+          summary: "p95 run latency above ${ALERT_P95_MS} ms for some agent (last 15m)."
+        data:
+          - refId: A
+            datasourceUid: loki
+            relativeTimeRange: {from: 900, to: 0}
+            model:
+              refId: A
+              queryType: instant
+              expr: 'max(quantile_over_time(0.95, {service_namespace="sb-agents"} | event="agent_run" | unwrap latency_ms [15m]) by (agent))'
+          - refId: B
+            datasourceUid: __expr__
+            model: {refId: B, type: reduce, expression: A, reducer: last}
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions: [{evaluator: {type: gt, params: [${ALERT_P95_MS}]}}]
+
+      - uid: sb-agent-daily-spend
+        title: Agent spend over daily budget
+        condition: C
+        for: 0s
+        noDataState: OK
+        execErrState: Error
+        labels: {team: sb-agents, signal: cost}
+        annotations:
+          summary: "LLM spend in the last 24h is above the ${ALERT_DAILY_USD} USD budget."
+        data:
+          - refId: A
+            datasourceUid: loki
+            relativeTimeRange: {from: 86400, to: 0}
+            model:
+              refId: A
+              queryType: instant
+              expr: 'sum(sum_over_time({service_namespace="sb-agents"} | event="agent_run" | unwrap cost_usd [24h]))'
+          - refId: B
+            datasourceUid: __expr__
+            model: {refId: B, type: reduce, expression: A, reducer: last}
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions: [{evaluator: {type: gt, params: [${ALERT_DAILY_USD}]}}]
+
+      - uid: sb-docs-agent-down
+        title: docs-agent down
+        condition: C
+        for: 1m
+        noDataState: OK
+        execErrState: Error
+        labels: {team: sb-agents, signal: availability, agent: docs-agent}
+        annotations:
+          summary: "docs-agent has exported no telemetry for 3m: process down or wedged. sb-support and the ADK router can't answer docs questions."
+        data:
+          - refId: A
+            datasourceUid: prometheus
+            relativeTimeRange: {from: 300, to: 0}
+            model:
+              refId: A
+              instant: true
+              expr: 'absent_over_time(target_info{service_name="docs-agent"}[3m])'
+          - refId: B
+            datasourceUid: __expr__
+            model: {refId: B, type: reduce, expression: A, reducer: last}
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions: [{evaluator: {type: gt, params: [0]}}]
