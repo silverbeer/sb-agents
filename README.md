@@ -30,6 +30,7 @@ corpus files; both are enforced by an output validator.
 op run --env-file=.env.op -- uv run docs-agent ask -v "How do I deploy missing-table?"
 op run --env-file=.env.op -- uv run docs-agent eval   # 13 cases, real model, exits 1 below 80%
 make eval                                             # same, exporting the score to Grafana (~$0.07)
+uv run docs-agent eval --model ollama:gemma4:12b-16k   # other models: see docs/notes/model-comparison.md
 ```
 
 Evals use `pydantic-evals`: cited-expected-source, low confidence on unanswerable

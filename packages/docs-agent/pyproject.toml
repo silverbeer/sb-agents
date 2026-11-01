@@ -5,7 +5,7 @@ description = "Specialist agent that answers questions from SB repo docs"
 requires-python = ">=3.13"
 dependencies = [
     "sb-obs",
-    "pydantic-ai-slim[anthropic]>=2.64",
+    "pydantic-ai-slim[anthropic,openai]>=2.64",  # openai: Ollama + OpenRouter providers
     "pydantic-evals>=2.64",
     "fasta2a[pydantic-ai]>=2.1",
     "uvicorn>=0.30",
