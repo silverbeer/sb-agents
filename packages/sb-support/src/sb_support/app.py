@@ -6,6 +6,7 @@ import os
 import re
 from typing import Any
 
+from opentelemetry import trace
 from pydantic_ai import Agent
 from pydantic_ai.exceptions import UsageLimitExceeded
 from slack_bolt.adapter.socket_mode.async_handler import AsyncSocketModeHandler
@@ -15,6 +16,7 @@ from sb_obs import model_name, setup_telemetry, track_run
 from sb_support.agent import USAGE_LIMITS, build_agent
 
 log = logging.getLogger("sb_support")
+_tracer = trace.get_tracer("sb_support")
 
 MENTION_RE = re.compile(r"<@[A-Z0-9]+>")
 
@@ -56,6 +58,19 @@ async def handle_mention(event: dict[str, Any], client: Any, agent: Agent[None, 
     question = strip_mentions(event.get("text", ""))
 
     await _react(client, channel, ts, WORKING)
+    # Root span for the whole Slack interaction: the agent run, the A2A hop and
+    # docs-agent's spans all hang off it.
+    with _tracer.start_as_current_span(
+        "slack app_mention",
+        kind=trace.SpanKind.SERVER,
+        attributes={"slack.channel": channel, "slack.ts": ts, "slack.thread_ts": thread_ts},
+    ):
+        await _reply(client, agent, channel, ts, thread_ts, question)
+
+
+async def _reply(
+    client: Any, agent: Agent[None, str], channel: str, ts: str, thread_ts: str, question: str
+) -> None:
     try:
         if not question:
             reply = "Hi! Mention me with a question and I'll answer in this thread."

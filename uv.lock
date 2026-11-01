@@ -1968,6 +1968,7 @@ version = "0.1.0"
 source = { editable = "packages/sb-obs" }
 dependencies = [
     { name = "genai-prices" },
+    { name = "httpx" },
     { name = "opentelemetry-exporter-otlp-proto-http" },
     { name = "opentelemetry-instrumentation-asgi" },
     { name = "opentelemetry-instrumentation-httpx" },
@@ -1979,6 +1980,7 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "genai-prices", specifier = ">=0.2" },
+    { name = "httpx", specifier = ">=0.27" },
     { name = "opentelemetry-exporter-otlp-proto-http", specifier = ">=1.44" },
     { name = "opentelemetry-instrumentation-asgi", specifier = ">=0.65b0" },
     { name = "opentelemetry-instrumentation-httpx", specifier = ">=0.65b0" },
@@ -1993,6 +1995,8 @@ version = "0.1.0"
 source = { editable = "packages/sb-support" }
 dependencies = [
     { name = "aiohttp" },
+    { name = "fasta2a" },
+    { name = "httpx" },
     { name = "pydantic-ai-slim", extra = ["anthropic"] },
     { name = "sb-obs" },
     { name = "slack-bolt" },
@@ -2001,6 +2005,8 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "aiohttp", specifier = ">=3.10" },
+    { name = "fasta2a", specifier = ">=2.1" },
+    { name = "httpx", specifier = ">=0.27" },
     { name = "pydantic-ai-slim", extras = ["anthropic"], specifier = ">=2.64" },
     { name = "sb-obs", editable = "packages/sb-obs" },
     { name = "slack-bolt", specifier = ">=1.30" },
