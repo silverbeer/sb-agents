@@ -49,6 +49,8 @@ class RunRecord(BaseModel):
     cost_usd: float | None = None  # None = unknown (model not priced), not zero
     latency_ms: int = 0
     confidence: str | None = None
+    routed_to: str | None = None  # comma-separated specialists asked, in order
+    escalated: bool = False
     error: str | None = None
 
 
@@ -61,6 +63,8 @@ class RunHandle:
     model: str
     usage: dict[str, Any] = field(default_factory=dict)
     confidence: str | None = None
+    routed_to: list[str] = field(default_factory=list)
+    escalated: bool = False
 
     def add_usage(
         self,
@@ -129,6 +133,8 @@ def track_run(agent: str, *, caller: str, model: str) -> Iterator[RunHandle]:
                 outcome=outcome,
                 latency_ms=int((time.perf_counter() - start) * 1000),
                 confidence=handle.confidence,
+                routed_to=",".join(handle.routed_to) or None,
+                escalated=handle.escalated,
                 error=error,
                 **handle.usage,
             )

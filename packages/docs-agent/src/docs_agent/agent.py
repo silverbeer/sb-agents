@@ -43,6 +43,9 @@ Rules:
 - If the docs do not answer the question, say so, leave the answer short, and set
   confidence to "low".
 - "high" confidence only when a doc states the answer directly.
+- Confidence is about the specific fact asked. If the docs cover the topic but not the fact
+  itself (a person's name, a date, a value, a current schedule), confidence is "low", even
+  though you are sure the docs don't contain it.
 - Docs may be stale. If a doc looks like a plan or proposal rather than current state, say so.
 """
 
@@ -65,7 +68,8 @@ class DocsAnswer(BaseModel):
         description=(
             "How well the docs SUPPORT the answer, not how sure you are that they don't: "
             "high = a doc states it directly; medium = inferred from related docs; "
-            "low = the docs don't answer it."
+            "low = the docs don't answer it, including when they cover the topic but not the "
+            "specific fact asked."
         )
     )
 
