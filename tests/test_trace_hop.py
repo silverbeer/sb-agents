@@ -27,14 +27,16 @@ def test_slack_question_is_one_trace_across_the_a2a_hop() -> None:
     for name in (
         "agent_run sb-support",
         "invoke_agent sb-support",
-        "execute_tool ask_docs",
+        "execute_tool ask_docs_agent",
         "POST /",
         "agent_run docs-agent",
         "invoke_agent docs-agent",
         "execute_tool search_docs",
     ):
         assert by_name.get(name) == root, (name, sorted(by_name))
-    assert len({s["trace"] for s in out["spans"]}) == 1
+    # Everything except startup discovery (the agent-card fetch) is the question's trace.
+    question = [s for s in out["spans"] if "agent-card" not in s["name"]]
+    assert {s["trace"] for s in question} == {root}
 
     # Run records of both agents carry the same trace_id: joinable in SQL without traces.
     records = {r["agent"]: r for r in logs if r.get("event") == "agent_run"}

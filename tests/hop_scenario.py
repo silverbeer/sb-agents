@@ -23,7 +23,7 @@ from docs_agent.agent import Deps, build_agent  # noqa: E402
 from docs_agent.corpus import Corpus, KeywordRetriever, split_sections  # noqa: E402
 from sb_support.agent import build_agent as build_support  # noqa: E402
 from sb_support.app import handle_mention  # noqa: E402
-from sb_support.docs_client import DocsClient  # noqa: E402
+from sb_support.specialists import discover  # noqa: E402
 
 BASE = "http://127.0.0.1:8101"
 MD = "# Install\n\nRun `uv tool install janitor-cli`."
@@ -46,7 +46,8 @@ async def main() -> str:
     async with app.router.lifespan_context(app):
         http = traced_http_client(transport=httpx.ASGITransport(app=app), base_url=BASE)
         async with http:
-            support = build_support(TestModel(call_tools=["ask_docs"]), docs=DocsClient(BASE, http))
+            specialists = await discover([BASE], http)  # from docs-agent's agent card
+            support = build_support(TestModel(call_tools=["ask_docs_agent"]), specialists)
             event = {"channel": "C1", "ts": "1.1", "text": "<@U0BOT> how do I install janitor?"}
             await handle_mention(event, slack, support)
     return slack.chat_postMessage.await_args.kwargs["text"]

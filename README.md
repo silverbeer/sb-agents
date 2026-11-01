@@ -11,7 +11,7 @@ uv workspace, one package per agent:
 
 | Package | Framework | What |
 |---|---|---|
-| `packages/sb-support` | PydanticAI + Slack Bolt | Answers @mentions in Slack threads (Socket Mode); SB questions go to docs-agent over A2A (`ask_docs`) |
+| `packages/sb-support` | PydanticAI + Slack Bolt | Answers @mentions and thread follow-ups (Socket Mode); routes to A2A specialists discovered from their agent cards; escalates when a specialist is unsure |
 | `packages/docs-agent` | PydanticAI + fasta2a | Answers from SB repo markdown docs, with citations and confidence; served over A2A |
 | `packages/adk-docs-client` | ADK | Router `LlmAgent` that delegates docs questions to docs-agent via `RemoteA2aAgent` |
 | `packages/sb-obs` | OpenTelemetry | Shared `setup_telemetry(service)`: traces, metrics, GCP-format JSON logs |
@@ -55,6 +55,8 @@ while working, replies in thread, then ✅ (or ❌ on failure).
 | `SLACK_APP_TOKEN` | `op://agents/sb-slack/app-token` (`xapp-`, scope `connections:write`) |
 | `ANTHROPIC_API_KEY` | `op://agents/anthropic_key/password` |
 | `SB_SUPPORT_MODEL` | optional, default `anthropic:claude-haiku-5-5` |
+| `SB_SUPPORT_SPECIALISTS` | optional, comma-separated A2A base URLs, default `http://127.0.0.1:8101` (docs-agent) |
+| `SB_SUPPORT_ESCALATE_TO` | optional Slack user ID to @mention when escalating |
 
 ## A2A hop (ADK → docs-agent)
 
@@ -64,6 +66,7 @@ op run --env-file=.env.op -- uv run adk-docs-client "How do I release the Androi
 ```
 
 What broke and why: [docs/notes/a2a-first-hop.md](docs/notes/a2a-first-hop.md).
+Routing, escalation and thread follow-ups: [docs/notes/sb-support-routing.md](docs/notes/sb-support-routing.md).
 
 ## Observability
 

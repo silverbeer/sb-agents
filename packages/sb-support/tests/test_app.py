@@ -95,7 +95,8 @@ async def test_answer_emits_run_record(monkeypatch: pytest.MonkeyPatch) -> None:
 
     records: list = []
     monkeypatch.setattr(runs, "emit", records.append)
-    assert await answer(agent_saying("hi"), "hello?") == "hi"
+    reply = await answer(agent_saying("hi"), "hello?")
+    assert (reply.text, reply.escalation) == ("hi", None)
     assert (records[0].agent, records[0].caller, records[0].outcome) == (
         "sb-support",
         "slack",
@@ -122,11 +123,11 @@ async def test_usage_limit_gets_a_specific_reply(monkeypatch: pytest.MonkeyPatch
 async def test_docs_client_unreachable_raises_docs_agent_error() -> None:
     import httpx
 
-    from sb_support.docs_client import DocsAgentError, DocsClient
+    from sb_support.specialists import SpecialistClient, SpecialistError
 
     def refuse(request: httpx.Request) -> httpx.Response:
         raise httpx.ConnectError("connection refused", request=request)
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(refuse)) as http:
-        with pytest.raises(DocsAgentError, match="unreachable"):
-            await DocsClient("http://127.0.0.1:8101", http).ask("q")
+        with pytest.raises(SpecialistError, match="unreachable"):
+            await SpecialistClient("http://127.0.0.1:8101", http).ask("q")

@@ -115,8 +115,8 @@ async def test_eval_summary_and_judge_wrapper_offline() -> None:
     report = await build_dataset(judge).evaluate(answer, max_concurrency=4, progress=False)
     passed, total, scores = summarize(report)
 
-    assert total == len(report.cases) == 13
+    assert total == len(report.cases) == 14
     assert 0 <= passed <= total
     assert {"Calibrated", "LLMJudge"} <= set(scores)
     assert scores["Calibrated"] == 1.0  # every answer is low confidence
-    assert judge.requests == 13 and judge.cost_usd is None
+    assert judge.requests == 14 and judge.cost_usd is None

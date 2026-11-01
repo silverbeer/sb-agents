@@ -148,6 +148,15 @@ CASES: list[Case[str, str, Meta]] = [
         expected_output="The docs do not cover this; there is no payments service on-call info.",
         metadata=Meta(answerable=False),
     ),
+    Case(
+        # The docs cover on-call (a placeholder rotation link) but not the fact asked.
+        # Caught live in SB-1476: docs-agent said "the docs don't name anyone" at high
+        # confidence, so sb-support didn't escalate.
+        name="partial-oncall-name",
+        inputs="Who is on call for missing-table this week?",
+        expected_output="The docs don't say who is on call; they only point at a rotation.",
+        metadata=Meta(answerable=False),
+    ),
 ]
 
 
