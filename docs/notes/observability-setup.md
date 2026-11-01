@@ -162,3 +162,37 @@ Prometheus translation appends the unit. The counter now has no unit.
 
 Not built: the optional SQL panel (run records in SQLite/Postgres). Loki's `unwrap`
 covered the same "aggregate the rows" practice without another store.
+
+## Alerts to #sb-alerts (SB-1487)
+
+`observability/grafana/provisioning/sb-agents-alerting.yaml`: one Slack contact point
+(`#sb-alerts`, the existing `sb-agent` bot token), one policy, four Grafana-managed rules
+(folder *sb-agents*, evaluated every 1m):
+
+| Rule | Query | Default |
+|---|---|---|
+| Agent runs failing | Loki: run records with `outcome != "ok"`, last 15m | > 1 |
+| Agent run latency p95 high | Loki: `quantile_over_time(0.95, ... unwrap latency_ms [15m])`, max by agent | > 20000 ms |
+| Agent spend over daily budget | Loki: `sum_over_time(... unwrap cost_usd [24h])` | > $1 |
+| docs-agent down | Prometheus: `absent_over_time(target_info{service_name="docs-agent"}[3m])`, for 1m | any |
+
+**Fired on purpose, all four, delivered to Slack with no error** (2026-11-01): low
+thresholds via `make obs-up ALERT_DAILY_USD=0.0001 ALERT_P95_MS=1000 ALERT_FAILED_RUNS=0`,
+one real question, one run against a model that doesn't exist (error record), and
+docs-agent stopped. Failing, latency and spend fired within ~45s; docs-agent down
+fired 4.5 min after the stop (3m absence + 1m pending).
+
+- **Liveness without scraping:** with OTLP push there is no Prometheus `up` metric. A
+  running server re-exports `target_info` every 60s, so its absence means the process
+  is gone. A short-lived CLI run also exports it, which briefly hides a down server;
+  fine for now, but a real deployment wants a health check (k3s, SB-1481).
+- **Grafana parses YAML before expanding `${VARS}`.** A placeholder inside a flow list
+  (`params: [${X}]`) stops Grafana starting, and otel-lgtm only says "Grafana exited
+  before becoming ready" until you set `ENABLE_LOGS_GRAFANA=true`. `make obs-up`
+  substitutes the thresholds itself; only `${SLACK_BOT_TOKEN}` is left for Grafana.
+  `tests/test_alerting.py` checks the file parses.
+- **The old receiver-test endpoint is gone in Grafana 13:** use
+  `POST /apis/notifications.alerting.grafana.app/v1beta1/namespaces/default/receivers/<uid>/test`
+  with the integration's settings in the body.
+- These alerts are sb-triage's input (SB-1475): the agents' own failures are the
+  first thing the triage agent gets to triage.

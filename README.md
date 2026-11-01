@@ -81,6 +81,10 @@ Dashboards are code: edit `observability/grafana/build_dashboards.py`, run `make
 and Grafana picks up the JSON (folder *sb-agents*). Cost and run panels read the run
 records in Loki; latency panels use Tempo span metrics and the service graph.
 
+Alerts (failing runs, p95, daily spend, docs-agent down) post to `#sb-alerts`.
+`make obs-up` needs `op` for the Slack token; thresholds are make variables
+(`ALERT_DAILY_USD`, `ALERT_P95_MS`, `ALERT_FAILED_RUNS`).
+
 | Env | Effect |
 |---|---|
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | export over OTLP/HTTP; unset = no export (tests, CI). `make` sets `http://localhost:4318` |
