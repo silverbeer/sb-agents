@@ -9,6 +9,7 @@ import time
 
 from docs_agent.agent import Deps, build_agent
 from docs_agent.corpus import Corpus, KeywordRetriever
+from sb_obs import setup_telemetry
 
 
 def _ask(question: str, show_tools: bool) -> int:
@@ -52,6 +53,7 @@ def main() -> None:
     ask.add_argument("-v", "--verbose", action="store_true", help="show tool calls")
     sub.add_parser("eval", help="run the eval set against the real model")
     args = parser.parse_args()
+    setup_telemetry("docs-agent")
 
     if args.cmd == "ask":
         raise SystemExit(_ask(args.question, args.verbose))

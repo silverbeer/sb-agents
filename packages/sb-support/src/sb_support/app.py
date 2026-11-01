@@ -10,6 +10,7 @@ from pydantic_ai import Agent
 from slack_bolt.adapter.socket_mode.async_handler import AsyncSocketModeHandler
 from slack_bolt.async_app import AsyncApp
 
+from sb_obs import setup_telemetry
 from sb_support.agent import build_agent
 
 log = logging.getLogger("sb_support")
@@ -87,10 +88,7 @@ async def _run() -> None:
 
 
 def main() -> None:
-    logging.basicConfig(
-        level=os.environ.get("LOG_LEVEL", "INFO"),
-        format="%(asctime)s %(levelname)s %(name)s %(message)s",
-    )
+    setup_telemetry("sb-support")
     required = ("SLACK_BOT_TOKEN", "SLACK_APP_TOKEN", "ANTHROPIC_API_KEY")
     missing = [k for k in required if not os.environ.get(k)]
     if missing:

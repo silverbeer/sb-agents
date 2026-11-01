@@ -10,6 +10,7 @@ from google.adk.runners import InMemoryRunner
 from google.genai import types
 
 from adk_docs_client.agent import build_root_agent
+from sb_obs import setup_telemetry
 
 
 async def ask(question: str) -> None:
@@ -33,4 +34,5 @@ async def ask(question: str) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(prog="adk-docs-client")
     parser.add_argument("question")
+    setup_telemetry("adk-docs-client")
     asyncio.run(ask(parser.parse_args().question))

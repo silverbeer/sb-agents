@@ -29,7 +29,7 @@ def deps() -> Deps:
     return Deps(corpus, KeywordRetriever(corpus))
 
 
-def test_model() -> TestModel:
+def fake_model() -> TestModel:
     return TestModel(call_tools=["search_docs"], custom_output_args=ANSWER)
 
 
@@ -84,7 +84,7 @@ def test_render_text_without_sources() -> None:
 
 
 async def test_with_deps_injects_deps(deps: Deps) -> None:
-    result = await WithDeps(build_agent(test_model()), deps).run("install jt?")
+    result = await WithDeps(build_agent(fake_model()), deps).run("install jt?")
     assert result.output.sources == [Source(ref="janitor/README.md", heading="Install")]
 
 
@@ -106,7 +106,7 @@ async def run_adk(remote, question: str) -> list:
 async def test_adk_remote_agent_round_trip(deps: Deps) -> None:
     from google.adk.agents.remote_a2a_agent import RemoteA2aAgent
 
-    app = build_app(deps=deps, agent=build_agent(test_model()), url=BASE)
+    app = build_app(deps=deps, agent=build_agent(fake_model()), url=BASE)
     async with app.router.lifespan_context(app):
         transport = httpx.ASGITransport(app=app)
         async with httpx.AsyncClient(transport=transport, base_url=BASE) as client:
@@ -154,7 +154,7 @@ async def test_canary_unpatched_fasta2a_with_adk(deps: Deps) -> None:
     from fasta2a.pydantic_ai import agent_to_a2a
     from google.adk.agents.remote_a2a_agent import RemoteA2aAgent
 
-    app = agent_to_a2a(WithDeps(build_agent(test_model()), deps), url=BASE)
+    app = agent_to_a2a(WithDeps(build_agent(fake_model()), deps), url=BASE)
     async with app.router.lifespan_context(app):
         transport = httpx.ASGITransport(app=app)
         async with httpx.AsyncClient(transport=transport, base_url=BASE) as client:

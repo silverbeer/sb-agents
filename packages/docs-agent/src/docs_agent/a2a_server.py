@@ -26,6 +26,7 @@ from pydantic_ai.agent import WrapperAgent
 
 from docs_agent.agent import Deps, DocsAnswer, build_agent
 from docs_agent.corpus import Corpus, KeywordRetriever
+from sb_obs import instrument_asgi, setup_telemetry
 
 log = logging.getLogger("docs_agent.a2a")
 
@@ -197,5 +198,6 @@ def main() -> None:
 
     host = os.environ.get("DOCS_AGENT_A2A_HOST", DEFAULT_HOST)
     port = int(os.environ.get("DOCS_AGENT_A2A_PORT", DEFAULT_PORT))
-    logging.basicConfig(level=os.environ.get("LOG_LEVEL", "INFO"))
-    uvicorn.run(build_app(), host=host, port=port)
+    setup_telemetry("docs-agent")
+    # log_config=None: uvicorn's loggers propagate to our JSON root handler.
+    uvicorn.run(instrument_asgi(build_app()), host=host, port=port, log_config=None)
