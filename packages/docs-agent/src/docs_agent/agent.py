@@ -3,17 +3,32 @@
 from __future__ import annotations
 
 import os
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
-from typing import Literal
+from decimal import Decimal
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 from pydantic_ai import Agent, ModelRetry, RunContext
+from pydantic_ai.agent import WrapperAgent
 from pydantic_ai.messages import ModelMessage, ToolCallPart
 from pydantic_ai.models import Model
+from pydantic_ai.usage import UsageLimits
 
 from docs_agent.corpus import Corpus, Retriever
+from sb_obs import model_name, track_run
 
 DEFAULT_MODEL = "anthropic:claude-haiku-5-5"
+
+# Per-run caps. Measured (SB-1478): a question takes 3-4 requests, ~2-4 tool calls,
+# ~15k tokens and ~$0.002 on Haiku, so these leave ~2-4x headroom and stop a loop.
+USAGE_LIMITS = UsageLimits(
+    request_limit=8,
+    tool_calls_limit=12,
+    total_tokens_limit=60_000,
+    cost_limit=Decimal("0.02"),
+)
 
 INSTRUCTIONS = """\
 You answer questions about silverbeer (SB) software projects using ONLY their docs.
@@ -115,3 +130,33 @@ def build_agent(model: Model | str | None = None) -> Agent[Deps, DocsAnswer]:
         return out
 
     return agent
+
+
+class WithDeps(WrapperAgent[Deps, DocsAnswer]):
+    """The one way docs-agent runs: fixed deps, usage limits, and a RunRecord.
+
+    fasta2a's worker calls `agent.run(message_history=...)` without deps, and
+    `run()`/`run_sync()` go through `iter()`, so overriding `iter()` covers the A2A
+    server, the CLI and the evals alike. `caller` labels the record.
+    """
+
+    def __init__(self, wrapped: Agent[Deps, DocsAnswer], deps: Deps, caller: str = "a2a") -> None:
+        super().__init__(wrapped)
+        self._deps = deps
+        self._caller = caller
+
+    @asynccontextmanager
+    async def iter(self, user_prompt: Any = None, **kwargs: Any) -> AsyncIterator[Any]:
+        if kwargs.get("deps") is None:
+            kwargs["deps"] = self._deps
+        if kwargs.get("usage_limits") is None:
+            kwargs["usage_limits"] = USAGE_LIMITS
+        model = model_name(kwargs.get("model") or self.wrapped.model)
+        with track_run("docs-agent", caller=self._caller, model=model) as handle:
+            async with self.wrapped.iter(user_prompt, **kwargs) as run:
+                try:
+                    yield run
+                finally:
+                    handle.record_usage(run.usage)
+                    if run.result is not None:
+                        handle.confidence = run.result.output.confidence

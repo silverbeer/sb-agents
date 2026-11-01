@@ -1,6 +1,19 @@
 """Shared telemetry for SB agents."""
 
 from sb_obs.logs import GcpJsonFormatter, trace_fields
+from sb_obs.runs import RunHandle, RunRecord, emit, model_name, price, track_run
 from sb_obs.setup import Telemetry, instrument_asgi, setup_telemetry
 
-__all__ = ["GcpJsonFormatter", "Telemetry", "instrument_asgi", "setup_telemetry", "trace_fields"]
+__all__ = [
+    "GcpJsonFormatter",
+    "RunHandle",
+    "RunRecord",
+    "Telemetry",
+    "emit",
+    "instrument_asgi",
+    "model_name",
+    "price",
+    "setup_telemetry",
+    "trace_fields",
+    "track_run",
+]

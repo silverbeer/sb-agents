@@ -7,7 +7,7 @@ import asyncio
 import sys
 import time
 
-from docs_agent.agent import Deps, build_agent
+from docs_agent.agent import Deps, WithDeps, build_agent
 from docs_agent.corpus import Corpus, KeywordRetriever
 from sb_obs import setup_telemetry
 
@@ -16,7 +16,7 @@ def _ask(question: str, show_tools: bool) -> int:
     corpus = Corpus.load()
     deps = Deps(corpus, KeywordRetriever(corpus))
     start = time.perf_counter()
-    result = build_agent().run_sync(question, deps=deps)
+    result = WithDeps(build_agent(), deps, caller="cli").run_sync(question)
     out = result.output
 
     if show_tools:

@@ -87,3 +87,33 @@ async def test_reaction_failure_does_not_block_reply() -> None:
     )
 
     client.chat_postMessage.assert_awaited_once()
+
+
+async def test_answer_emits_run_record(monkeypatch: pytest.MonkeyPatch) -> None:
+    from sb_obs import runs
+    from sb_support.app import answer
+
+    records: list = []
+    monkeypatch.setattr(runs, "emit", records.append)
+    assert await answer(agent_saying("hi"), "hello?") == "hi"
+    assert (records[0].agent, records[0].caller, records[0].outcome) == (
+        "sb-support",
+        "slack",
+        "ok",
+    )
+    assert records[0].requests == 1
+
+
+async def test_usage_limit_gets_a_specific_reply(monkeypatch: pytest.MonkeyPatch) -> None:
+    from pydantic_ai.usage import UsageLimits
+
+    from sb_support import app
+
+    monkeypatch.setattr(app, "USAGE_LIMITS", UsageLimits(total_tokens_limit=1))
+    client = fake_client()
+    event = {"channel": "C1", "ts": "1.1", "text": "<@U0BOT> big question"}
+
+    await handle_mention(event, client, agent_saying("a long answer"))
+
+    assert "more work than I'm allowed" in client.chat_postMessage.await_args.kwargs["text"]
+    client.reactions_add.assert_any_await(channel="C1", timestamp="1.1", name="x")
