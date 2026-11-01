@@ -10,12 +10,23 @@ OBS_ENV    := OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318 \
               SB_OBS_CAPTURE_CONTENT=$(or $(SB_OBS_CAPTURE_CONTENT),1) \
               PYDANTIC_AI_NO_BANNER=1
 
-.PHONY: obs-up obs-down obs-logs docs-a2a support ask adk-ask test lint
+.PHONY: obs-up obs-down obs-logs dashboards docs-a2a support ask adk-ask test lint
 
+GRAFANA_DIR := $(CURDIR)/observability/grafana
+PROVISIONING := /otel-lgtm/grafana/conf/provisioning
+
+# Dashboards (and alerting, SB-1487) are provisioned from the repo; after changing the
+# mounts themselves, `make obs-down obs-up` (container data is not persisted).
 obs-up:
 	@docker start $(LGTM_NAME) 2>/dev/null || docker run -d --name $(LGTM_NAME) \
-		-p 3000:3000 -p 4317:4317 -p 4318:4318 $(LGTM_IMAGE)
+		-p 3000:3000 -p 4317:4317 -p 4318:4318 \
+		-v $(GRAFANA_DIR)/dashboards:/sb-agents/dashboards:ro \
+		-v $(GRAFANA_DIR)/provisioning/sb-agents-dashboards.yaml:$(PROVISIONING)/dashboards/sb-agents.yaml:ro \
+		$(LGTM_IMAGE)
 	@echo "Grafana: http://localhost:3000  OTLP: http://localhost:4318"
+
+dashboards:
+	uv run python observability/grafana/build_dashboards.py
 
 obs-down:
 	docker rm -f $(LGTM_NAME)

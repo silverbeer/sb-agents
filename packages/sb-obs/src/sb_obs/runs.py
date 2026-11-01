@@ -149,7 +149,8 @@ def emit(record: RunRecord) -> None:
         1, {**attrs, "outcome": record.outcome}
     )
     if record.cost_usd is not None:
-        meter.create_counter("sb_agent_cost_usd", unit="USD", description="Agent spend").add(
+        # No `unit`: the Prometheus exporter would append it (sb_agent_cost_usd_USD_total).
+        meter.create_counter("sb_agent_cost_usd", description="Agent spend in USD").add(
             record.cost_usd, attrs
         )
     meter.create_histogram("sb_agent_run_duration", unit="s", description="Run latency").record(
