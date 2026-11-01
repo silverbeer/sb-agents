@@ -10,7 +10,7 @@ OBS_ENV    := OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318 \
               SB_OBS_CAPTURE_CONTENT=$(or $(SB_OBS_CAPTURE_CONTENT),1) \
               PYDANTIC_AI_NO_BANNER=1
 
-.PHONY: obs-up obs-down obs-logs dashboards docs-a2a support ask adk-ask test lint
+.PHONY: obs-up obs-down obs-logs dashboards eval docs-a2a support ask adk-ask test lint
 
 GRAFANA_DIR := $(CURDIR)/observability/grafana
 PROVISIONING := /otel-lgtm/grafana/conf/provisioning
@@ -20,6 +20,7 @@ PROVISIONING := /otel-lgtm/grafana/conf/provisioning
 ALERT_FAILED_RUNS ?= 1
 ALERT_P95_MS      ?= 20000
 ALERT_DAILY_USD   ?= 1
+ALERT_EVAL_PASS   ?= 0.8
 
 RENDERED := $(GRAFANA_DIR)/.rendered
 
@@ -33,6 +34,7 @@ obs-up:
 	@sed -e 's/$${ALERT_FAILED_RUNS}/$(ALERT_FAILED_RUNS)/g' \
 		-e 's/$${ALERT_P95_MS}/$(ALERT_P95_MS)/g' \
 		-e 's/$${ALERT_DAILY_USD}/$(ALERT_DAILY_USD)/g' \
+		-e 's/$${ALERT_EVAL_PASS}/$(ALERT_EVAL_PASS)/g' \
 		$(GRAFANA_DIR)/provisioning/sb-agents-alerting.yaml > $(RENDERED)/sb-agents-alerting.yaml
 	@docker start $(LGTM_NAME) 2>/dev/null || $(OP) docker run -d --name $(LGTM_NAME) \
 		-p 3000:3000 -p 4317:4317 -p 4318:4318 \
@@ -57,6 +59,10 @@ docs-a2a:
 
 support:
 	$(OBS_ENV) $(OP) uv run sb-support
+
+# Real model + Sonnet judge: ~$0.1 per run (measured in SB-1488). On demand, not in CI.
+eval:
+	$(OBS_ENV) $(OP) uv run docs-agent eval
 
 ask:
 	$(OBS_ENV) $(OP) uv run docs-agent ask -v "$(Q)"

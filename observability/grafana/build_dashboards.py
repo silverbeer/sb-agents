@@ -24,6 +24,7 @@ OUT = Path(__file__).parent / "dashboards"
 LOKI = {"type": "loki", "uid": "loki"}
 PROM = {"type": "prometheus", "uid": "prometheus"}
 RUNS = '{service_namespace="sb-agents"} | event="agent_run"'
+EVALS = '{service_namespace="sb-agents"} | event="eval_run"'
 
 
 def _target(ds: dict, expr: str, legend: str = "", instant: bool = False) -> dict:

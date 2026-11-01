@@ -195,3 +195,45 @@ def price(
     except Exception:  # noqa: BLE001 - unknown model/provider: cost unknown, not an error
         return None
     return float(result.total_price)
+
+
+class EvalRecord(BaseModel):
+    """One eval-suite run: the quality signal over time (SB-1488)."""
+
+    eval_id: str = Field(default_factory=lambda: uuid.uuid4().hex)
+    suite: str
+    model: str
+    judge_model: str
+    cases: int
+    passed: int
+    pass_rate: float
+    scores: dict[str, float] = Field(default_factory=dict)  # evaluator -> fraction passed
+    agent_cost_usd: float | None = None
+    judge_cost_usd: float | None = None
+    duration_s: float = 0.0
+
+    @property
+    def cost_usd(self) -> float | None:
+        known = [c for c in (self.agent_cost_usd, self.judge_cost_usd) if c is not None]
+        return sum(known) if known else None
+
+
+def emit_eval(record: EvalRecord) -> None:
+    """Log the eval as one JSON line (`event=eval_run`) and set the eval gauges."""
+    fields = record.model_dump(exclude={"scores"})
+    fields.update({f"score_{name}": value for name, value in record.scores.items()})
+    fields["cost_usd"] = record.cost_usd
+    log.info("eval run", extra={"event": "eval_run", **fields})
+
+    meter = metrics.get_meter("sb_obs")
+    attrs = {"suite": record.suite, "model": record.model}
+    meter.create_gauge("sb_eval_pass_rate", description="Eval cases passed, 0-1").set(
+        record.pass_rate, attrs
+    )
+    score = meter.create_gauge("sb_eval_score", description="Evaluator pass fraction, 0-1")
+    for name, value in record.scores.items():
+        score.set(value, {**attrs, "evaluator": name})
+    if record.cost_usd is not None:
+        meter.create_counter("sb_eval_cost_usd", description="Eval spend in USD").add(
+            record.cost_usd, attrs
+        )

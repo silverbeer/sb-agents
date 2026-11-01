@@ -143,3 +143,31 @@ groups:
               type: threshold
               expression: B
               conditions: [{evaluator: {type: gt, params: [0]}}]
+
+      - uid: sb-eval-score-drop
+        title: docs-agent eval below threshold
+        condition: C
+        for: 0s
+        noDataState: OK
+        execErrState: Error
+        labels: {team: sb-agents, signal: quality, agent: docs-agent}
+        annotations:
+          summary: "The latest docs-agent eval run (last 7d) passed under ${ALERT_EVAL_PASS} of cases. Check which evaluator dropped before changing models or prompts."
+        data:
+          - refId: A
+            datasourceUid: loki
+            relativeTimeRange: {from: 604800, to: 0}
+            model:
+              refId: A
+              queryType: instant
+              expr: 'min(last_over_time({service_namespace="sb-agents"} | event="eval_run" | unwrap pass_rate [7d]))'
+          - refId: B
+            datasourceUid: __expr__
+            model: {refId: B, type: reduce, expression: A, reducer: last}
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions: [{evaluator: {type: lt, params: [${ALERT_EVAL_PASS}]}}]
