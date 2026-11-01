@@ -22,7 +22,7 @@ filterwarnings = [
     # TestModel has no price data, so cost_limit can't be enforced in tests.
     "ignore:A `cost_limit` is set",
 ]
-testpaths = ["packages"]
+testpaths = ["packages", "tests"]
 addopts = "--import-mode=importlib"
 
 [tool.ruff]

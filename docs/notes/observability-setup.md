@@ -105,3 +105,33 @@ Per request, caching was ~21% cheaper ($0.00036 vs $0.00046), but the run took
 two extra requests (model nondeterminism) and cache writes cost 1.25x, so the run
 cost more. At ~4 short requests per question the write premium roughly cancels
 the read discount. Revisit when Slack threads become multi-turn or prompts grow.
+
+## One question, one trace, both hops (SB-1485)
+
+Both A2A clients now produce a single trace with docs-agent:
+
+| Hop | Client | How the trace crosses | Verified |
+|---|---|---|---|
+| ADK router → docs-agent | a2a-sdk via `RemoteA2aAgent` | httpx instrumentation injects `traceparent` | live (Tempo) |
+| sb-support → docs-agent | fasta2a `A2AClient` (`sb_support.docs_client`) | `sb_obs.traced_http_client` injects in a request hook; httpx instrumentation also does on real transports | automated (`tests/test_trace_hop.py`) and live |
+
+On the server, `instrument_asgi` (ASGI middleware) continues the incoming trace.
+
+- **Root span:** sb-support opens `slack app_mention` (SERVER, with `slack.channel`,
+  `slack.ts`, `slack.thread_ts`). Slack Bolt uses aiohttp, which isn't instrumented,
+  so without this span every Slack question would start at the agent run.
+- **Run records join on trace_id.** A live run: sb-support (2 requests, $0.00025) and
+  docs-agent (3 requests, $0.0013, caller `a2a`) records carry the same trace_id
+  from different processes. "Cost of one Slack question" = sum of records per trace_id,
+  even where traces are sampled away.
+- **Why inject explicitly when instrumentation already does:** the instrumentation
+  only patches httpx's network transports. A hook makes propagation part of the
+  client's contract, so it holds over `ASGITransport` in tests and doesn't depend
+  on someone remembering to instrument at work.
+- **fasta2a's server has no blocking `message/send`** (it returns `submitted`), so
+  the client uses `message/stream` and waits for the final artifact, like ADK does.
+- Not automated: the ADK hop over a real socket. It was verified live in SB-1478;
+  an in-process test would test our hook, not ADK's client.
+
+The `ask_docs` tool is the minimal version of SB-1476's routing: one specialist,
+no thread history, no escalation.

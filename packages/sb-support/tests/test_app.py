@@ -117,3 +117,16 @@ async def test_usage_limit_gets_a_specific_reply(monkeypatch: pytest.MonkeyPatch
 
     assert "more work than I'm allowed" in client.chat_postMessage.await_args.kwargs["text"]
     client.reactions_add.assert_any_await(channel="C1", timestamp="1.1", name="x")
+
+
+async def test_docs_client_unreachable_raises_docs_agent_error() -> None:
+    import httpx
+
+    from sb_support.docs_client import DocsAgentError, DocsClient
+
+    def refuse(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("connection refused", request=request)
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(refuse)) as http:
+        with pytest.raises(DocsAgentError, match="unreachable"):
+            await DocsClient("http://127.0.0.1:8101", http).ask("q")

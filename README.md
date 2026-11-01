@@ -11,7 +11,7 @@ uv workspace, one package per agent:
 
 | Package | Framework | What |
 |---|---|---|
-| `packages/sb-support` | PydanticAI + Slack Bolt | Answers @mentions in Slack threads (Socket Mode) |
+| `packages/sb-support` | PydanticAI + Slack Bolt | Answers @mentions in Slack threads (Socket Mode); SB questions go to docs-agent over A2A (`ask_docs`) |
 | `packages/docs-agent` | PydanticAI + fasta2a | Answers from SB repo markdown docs, with citations and confidence; served over A2A |
 | `packages/adk-docs-client` | ADK | Router `LlmAgent` that delegates docs questions to docs-agent via `RemoteA2aAgent` |
 | `packages/sb-obs` | OpenTelemetry | Shared `setup_telemetry(service)`: traces, metrics, GCP-format JSON logs |
@@ -73,7 +73,7 @@ Every entry point calls `sb_obs.setup_telemetry("<service>")`. Local backend is
 make obs-up                                   # Grafana http://localhost:3000 (admin/admin)
 make docs-a2a                                 # docs-agent A2A server, exporting
 make adk-ask Q="How do I install janitor?"    # one trace across router -> A2A -> docs-agent
-make support                                  # Slack bot, exporting
+make support                                  # Slack bot, exporting (needs docs-a2a running)
 make obs-down
 ```
 
