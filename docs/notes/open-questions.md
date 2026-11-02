@@ -5,13 +5,11 @@ default I chose, so nothing is blocked except where marked **BLOCKED**.
 
 ## Needs you
 
-1. **OpenRouter credits for SB-1490's paid rows.** Key works (added 2026-11-01), but it has
-   $0 credits, so only `:free` models run (50 requests/day). nemotron `:free` scored 13/14;
-   both Gemma `:free` models were 429'd upstream. Buy $10 to run 2-3 cheap paid models
-   and lift the free cap to 1,000/day? (The key's own limit is $20/month.) Also: the ADK
-   half of SB-1490 is blocked by a LiteLLM/openai version conflict; pick an option in
-   model-comparison.md or drop that AC. Ollama model `gemma4:12b-16k` still exists
-   (`ollama rm gemma4:12b-16k`).
+1. **SB-1490 follow-ups.** Credits bought; paid evals done (model-comparison.md):
+   GLM-5.3-flash 14/14, DeepSeek-v4.1-flash 13/14 at ~1/9 Haiku's cost. Run repeat evals
+   and switch docs-agent to DeepSeek? Raise its 60k token cap? The ADK half is still
+   blocked by the LiteLLM/openai conflict: pick an option or drop that AC. Ollama model
+   `gemma4:12b-16k` still exists (`ollama rm gemma4:12b-16k`).
 2. **fasta2a upstream bugs** (naive timestamps; first streamed chunk `append=True`).
    Filing them is public, so still waiting on your yes.
 3. **Doc contradictions cleanup ticket** (match-scraper cron 6h vs daily 14:00; MT roles

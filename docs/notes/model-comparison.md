@@ -2,9 +2,8 @@
 
 Same 14-case docs-agent eval (13 before SB-1476 added `partial-oncall-name`), same
 Sonnet 5.5 judge, same per-run caps (8 requests, 12 tool calls, 60k tokens).
-OpenRouter rows measured 2026-11-01 on a key with **no credits** (`is_free_tier: true`,
-`total_credits: 0`), so only `:free` models could run; paid rows wait on a credit
-purchase (open-questions.md).
+OpenRouter rows measured 2026-11-01: `:free` first on a key with no credits, then paid
+models after a $25 credit purchase.
 
 | Model | Where | Passed | Errors | Agent $ / eval | Latency per run | Notes |
 |---|---|---|---|---|---|---|
@@ -14,7 +13,10 @@ purchase (open-questions.md).
 | nvidia/nemotron-3.5-super-vl:free | OpenRouter | **13/14 (93%)** | 0 | $0 | p50 8.2 s, p95 22.4 s | 1 missed expected source (`linear-done`); ~3.2 requests/case |
 | google/gemma-4-31b-it:free | OpenRouter | — | — | — | — | 429 on first request, 2 tries: "rate-limited upstream" (shared Google AI Studio pool) |
 | google/gemma-4-26b-a4b-it:free | OpenRouter | — | — | — | — | same 429, upstream shared pool |
-| OpenRouter cheap paid x 2-3 | — | needs credits | | | | candidates below |
+| z-ai/glm-5.3-flash | OpenRouter | **14/14 (100%)** | 0 | $0.021 (~$0.0015/question) | p50 6.8 s, p95 26.6 s | matches Haiku on score and price, slower tail |
+| deepseek/deepseek-v4.1-flash | OpenRouter | **13/14 (93%)** | 1 | $0.0025 (~$0.0002/question) | p50 3.4 s, p95 5.3 s | fastest and ~9x cheaper than Haiku; the 1 error was our 60k token cap (66k used), not a wrong answer |
+| openai/gpt-6-luna | OpenRouter | inconclusive (4/5 that ran) | 9-10 | ~$0.002 for 5 cases | p50 ~6 s | 429 "new accounts are limited to 20 requests per minute"; 1 tool-retry failure (`read_doc`) |
+| google/gemma-4-31b-it:free (with credits) | OpenRouter | 0/14 | 14 | — | — | every case 429'd upstream; credits don't help a shared provider pool |
 
 \* Eval runs 4 cases at a time against one Ollama, so this includes queueing. A single
 run took about 100 s (SB-1490 smoke test: 4 requests, 6.9k in / 1.5k out tokens).
@@ -23,6 +25,17 @@ Judge cost per eval: $0.046 (Haiku), $0.016 (gemma 4k: only 5 cases reached the 
 $0.039 (gemma 16k).
 
 ## Findings
+
+- **Two cheap paid models match Haiku.** GLM-5.3-flash scored 14/14 at Haiku's price.
+  DeepSeek-v4.1-flash scored 13/14 at about 1/9 of Haiku's cost and was the fastest model
+  tested (p50 3.4 s); its one failure was docs-agent's 60k-token cap, not a bad answer.
+  One eval run each, so this is a signal, not a verdict: run 2-3 more before changing a default.
+- **Computed cost is close to the bill.** genai-prices priced every paid OpenRouter run;
+  the agent-side total was $0.028 against $0.0307 billed by OpenRouter (~9% low; the
+  difference isn't explained yet). Good enough for dashboards; reconcile monthly.
+- **New OpenRouter accounts are rate-limited per model** (20 requests/minute on
+  gpt-6-luna). The eval runs 4 cases at once at ~3.4 requests each, so it trips that
+  limit; a Slack bot at SB volume wouldn't.
 
 - **A free OpenRouter model passed the bar.** nemotron-3.5-super-vl `:free` scored 13/14
   (Calibrated 100%, LLMJudge 100%, CitedExpectedSource 92%) at p50 8.2 s, about 2x
@@ -86,7 +99,8 @@ GLM flash is clearly cheaper. The reason to run them is quality per dollar, not 
 
 ## Recommendation per role (so far)
 
-- **Specialist (docs-agent):** keep Haiku. nemotron `:free` is good enough for
-  experiments and evals, but the free quota rules it out for serving.
+- **Specialist (docs-agent):** keep Haiku for now. DeepSeek-v4.1-flash is the candidate to
+  replace it (9x cheaper, faster, 13/14), pending repeat evals and a token cap decision.
+  GLM-5.3-flash is a like-for-like fallback. nemotron `:free` is fine for experiments.
 - **Router (sb-support / ADK):** keep Haiku; the ADK side can't switch yet (LiteLLM conflict).
 - **Judge:** keep Sonnet 5.5 so scores stay comparable.
