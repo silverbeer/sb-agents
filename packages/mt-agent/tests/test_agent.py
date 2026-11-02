@@ -125,7 +125,7 @@ def test_default_model_is_claude_from_env(monkeypatch: pytest.MonkeyPatch) -> No
     monkeypatch.setenv("MT_AGENT_MODEL", "claude-sonnet-5")
     agent = build_agent(toolset=build_toolset(MCP_URL, "t"))
     assert agent.model.model == "claude-sonnet-5"
-    assert TOOLS == ("search_teams", "get_upcoming_matches", "get_standings")
+    assert TOOLS == ("search_teams", "list_divisions", "get_upcoming_matches", "get_standings")
 
 
 async def run(runner: TrackedRunner, session_id: str = "s1") -> list[Event]:

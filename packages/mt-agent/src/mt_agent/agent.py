@@ -25,7 +25,7 @@ NAME = "mt_agent"  # ADK agent names must be identifiers; the A2A card says "mt-
 DEFAULT_MODEL = "claude-haiku-5-5"
 DEFAULT_MCP_URL = "https://api.missingtable.com/mcp/"
 CLIENT_HEADER = "sb-agents"  # X-MT-Client: can only narrow the tiers mt-mcp lists
-TOOLS = ("search_teams", "get_upcoming_matches", "get_standings")
+TOOLS = ("search_teams", "list_divisions", "get_upcoming_matches", "get_standings")
 
 INSTRUCTIONS = """\
 You answer questions about MissingTable (MT), a youth soccer site: teams, upcoming matches
@@ -35,6 +35,10 @@ and standings. Use ONLY your tools; only state facts that appear in tool results
 - Upcoming matches: get_upcoming_matches. "matches": [] means nothing is scheduled as of
   "today"; only say data is unavailable when the result has an "error". Kickoff times are
   the club's local time. A postponed match is still listed: say it was postponed.
+- A table named by its division or league, not a team ("U15 Northeast", "the Flex New
+  England table"): find it with list_divisions (filter by age_group and query), then call
+  get_standings with that division id and age_group id. If it says "not_found", tell them
+  which divisions exist at that age.
 - Standings: get_standings with the team_id and age_group id. Competition is "League" unless
   the question asks for Flex, or "qualifying" for the combined League + Flex record. If it
   says "ambiguous", pick from "options" when the question decides it (a Flex table is the
