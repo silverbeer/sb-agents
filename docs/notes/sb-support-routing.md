@@ -1,12 +1,35 @@
-# sb-support: specialists, escalation, thread follow-ups (SB-1476)
+# sb-support: channels, specialists, escalation, follow-ups (SB-1476, SB-1498)
 
 ```
-Slack mention / thread reply
-  └─ sb-support (PydanticAI, Haiku)
+Slack mention / thread reply ─► Slack adapter ─┐
+(Telegram, MT app: future adapters) ───────────┼─► core: InboundMessage → Reply
+                                               │
+  └─ sb-support agent (PydanticAI, Haiku)
        ├─ ask_docs_agent ──A2A──► docs-agent      (tool built from docs-agent's agent card)
        ├─ ask_<next>     ──A2A──► infra/change/…  (just add a URL)
        └─ deterministic escalation ──► "<@human> can you take this?"
 ```
+
+## Channels are adapters (SB-1498)
+
+`sb_support.core` is the front door every channel shares. It owns routing (the agent),
+conversation memory, the escalation decision, the RunRecord (`caller` = channel) and the
+root span (`support message <channel>`). It imports no channel SDK; a test checks that.
+
+The contract an adapter implements:
+
+| Direction | Adapter does | Core type |
+|---|---|---|
+| in | event → `InboundMessage(channel, conversation_id, text, user_id?, message_id?, attributes?)`; strip channel markup (mentions); pick the conversation id (Slack: `<channel>:<thread_ts>`) | `InboundMessage` |
+| call | `await core.handle(msg)`; it never raises | `SupportCore` |
+| out | render `Reply.text`; show `Reply.outcome` (`answered`, `escalated`, `limit`, `error`, `help`) its own way; add who to escalate to from its own config | `Reply` |
+| follow-ups | decide if an unaddressed message continues a conversation; `core.knows(channel, conversation_id)` says whether we've answered there | — |
+
+`sb_support.slack` is the first adapter: reactions (👀 → ✅/🙋/❌), thread replies,
+`<@SB_SUPPORT_ESCALATE_TO>` mentions, and the Slack-flavored help text all live there.
+A second channel is one new module; `tests/test_core.py` runs the core through a fake
+channel to prove it. Next adapters: Telegram (personal) and MT Chat in the MT web and
+mobile apps, through MT's `/api/ai/chat`.
 
 ## Specialists come from agent cards
 
@@ -43,8 +66,9 @@ on-call phrasings, high on an answerable question, 14/14 evals ($0.069).
 
 ## Thread follow-ups
 
-- **Memory:** per-thread history in process (`ThreadMemory`), trimmed by whole runs
-  (never between a tool call and its result) and capped at 200 threads x 6 runs. It's
+- **Memory:** per-conversation history in process (`ConversationMemory`, keyed
+  `<channel>:<conversation_id>`), trimmed by whole runs (never between a tool call and
+  its result) and capped at 200 conversations x 6 runs. It's
   lost on restart; a persistent store can come later if it's ever needed.
 - **No re-mention needed:** the manifest already subscribed to channel `message` events.
   A human reply in a thread sb-support has answered is handled as a follow-up. Messages

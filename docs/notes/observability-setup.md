@@ -113,13 +113,16 @@ Both A2A clients now produce a single trace with docs-agent:
 | Hop | Client | How the trace crosses | Verified |
 |---|---|---|---|
 | ADK router → docs-agent | a2a-sdk via `RemoteA2aAgent` | httpx instrumentation injects `traceparent` | live (Tempo) |
-| sb-support → docs-agent | fasta2a `A2AClient` (`sb_support.docs_client`) | `sb_obs.traced_http_client` injects in a request hook; httpx instrumentation also does on real transports | automated (`tests/test_trace_hop.py`) and live |
+| sb-support → docs-agent | fasta2a `A2AClient` (`sb_support.specialists`) | `sb_obs.traced_http_client` injects in a request hook; httpx instrumentation also does on real transports | automated (`tests/test_trace_hop.py`) and live |
 
 On the server, `instrument_asgi` (ASGI middleware) continues the incoming trace.
 
-- **Root span:** sb-support opens `slack app_mention` (SERVER, with `slack.channel`,
-  `slack.ts`, `slack.thread_ts`). Slack Bolt uses aiohttp, which isn't instrumented,
-  so without this span every Slack question would start at the agent run.
+- **Root span:** sb-support's channel-neutral core opens `support message <channel>`
+  (SERVER, with `messaging.system`, `messaging.message.id`, `sb.conversation_id`,
+  `sb.outcome`, plus adapter attributes such as `slack.channel`, `slack.ts`,
+  `slack.thread_ts`). Since SB-1498; it was `slack app_mention` before. Slack Bolt
+  uses aiohttp, which isn't instrumented, so without this span every Slack question
+  would start at the agent run.
 - **Run records join on trace_id.** A live run: sb-support (2 requests, $0.00025) and
   docs-agent (3 requests, $0.0013, caller `a2a`) records carry the same trace_id
   from different processes. "Cost of one Slack question" = sum of records per trace_id,

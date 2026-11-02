@@ -1,4 +1,4 @@
-"""Slack mention → sb-support → A2A → docs-agent, in one process, real telemetry setup.
+"""Slack mention → sb-support (adapter → core) → A2A → docs-agent, one process, real telemetry.
 
 Run by test_trace_hop.py in a subprocess (OTel global providers are set-once).
 Prints JSON: spans (service-less, so tagged by scope) and the run records logged.
@@ -22,7 +22,8 @@ from docs_agent.a2a_server import build_app  # noqa: E402
 from docs_agent.agent import Deps, build_agent  # noqa: E402
 from docs_agent.corpus import Corpus, KeywordRetriever, split_sections  # noqa: E402
 from sb_support.agent import build_agent as build_support  # noqa: E402
-from sb_support.app import handle_mention  # noqa: E402
+from sb_support.core import SupportCore  # noqa: E402
+from sb_support.slack import handle_event  # noqa: E402
 from sb_support.specialists import discover  # noqa: E402
 
 BASE = "http://127.0.0.1:8101"
@@ -49,7 +50,7 @@ async def main() -> str:
             specialists = await discover([BASE], http)  # from docs-agent's agent card
             support = build_support(TestModel(call_tools=["ask_docs_agent"]), specialists)
             event = {"channel": "C1", "ts": "1.1", "text": "<@U0BOT> how do I install janitor?"}
-            await handle_mention(event, slack, support)
+            await handle_event(event, slack, SupportCore(support))
     return slack.chat_postMessage.await_args.kwargs["text"]
 
 

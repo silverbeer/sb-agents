@@ -13,7 +13,7 @@ dependencies = [
 ]
 
 [project.scripts]
-sb-support = "sb_support.app:main"
+sb-support = "sb_support.slack:main"
 
 [tool.uv.sources]
 sb-obs = { workspace = true }
