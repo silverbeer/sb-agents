@@ -4,7 +4,8 @@ import pytest
 from pydantic_ai import Agent
 from pydantic_ai.models.test import TestModel
 
-from sb_support.app import handle_mention, strip_mentions
+from sb_support.core import SupportCore
+from sb_support.slack import handle_event, strip_mentions
 
 
 def fake_client() -> MagicMock:
@@ -36,7 +37,7 @@ async def test_replies_in_new_thread_with_reactions() -> None:
     client = fake_client()
     event = {"channel": "C1", "ts": "111.1", "text": "<@U0BOT> what is MT?"}
 
-    await handle_mention(event, client, agent_saying("Missing Table is a league app."))
+    await handle_event(event, client, SupportCore(agent_saying("Missing Table is a league app.")))
 
     client.chat_postMessage.assert_awaited_once_with(
         channel="C1", thread_ts="111.1", text="Missing Table is a league app."
@@ -50,7 +51,7 @@ async def test_reply_stays_in_existing_thread() -> None:
     client = fake_client()
     event = {"channel": "C1", "ts": "222.2", "thread_ts": "111.1", "text": "<@U0BOT> again"}
 
-    await handle_mention(event, client, agent_saying("ok"))
+    await handle_event(event, client, SupportCore(agent_saying("ok")))
 
     assert client.chat_postMessage.await_args.kwargs["thread_ts"] == "111.1"
 
@@ -60,7 +61,9 @@ async def test_empty_mention_gets_help_without_calling_model() -> None:
     agent = MagicMock()
     agent.run = AsyncMock()
 
-    await handle_mention({"channel": "C1", "ts": "1.1", "text": "<@U0BOT>"}, client, agent)
+    await handle_event(
+        {"channel": "C1", "ts": "1.1", "text": "<@U0BOT>"}, client, SupportCore(agent)
+    )
 
     agent.run.assert_not_awaited()
     assert "Mention me" in client.chat_postMessage.await_args.kwargs["text"]
@@ -71,7 +74,9 @@ async def test_agent_failure_posts_apology_and_x() -> None:
     agent = MagicMock()
     agent.run = AsyncMock(side_effect=RuntimeError("model down"))
 
-    await handle_mention({"channel": "C1", "ts": "1.1", "text": "<@U0BOT> hi"}, client, agent)
+    await handle_event(
+        {"channel": "C1", "ts": "1.1", "text": "<@U0BOT> hi"}, client, SupportCore(agent)
+    )
 
     assert "went wrong" in client.chat_postMessage.await_args.kwargs["text"]
     client.reactions_add.assert_any_await(channel="C1", timestamp="1.1", name="x")
@@ -82,21 +87,24 @@ async def test_reaction_failure_does_not_block_reply() -> None:
     client = fake_client()
     client.reactions_add = AsyncMock(side_effect=RuntimeError("already_reacted"))
 
-    await handle_mention(
-        {"channel": "C1", "ts": "1.1", "text": "<@U0BOT> hi"}, client, agent_saying("still here")
+    await handle_event(
+        {"channel": "C1", "ts": "1.1", "text": "<@U0BOT> hi"},
+        client,
+        SupportCore(agent_saying("still here")),
     )
 
     client.chat_postMessage.assert_awaited_once()
 
 
-async def test_answer_emits_run_record(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_slack_run_record_has_slack_caller(monkeypatch: pytest.MonkeyPatch) -> None:
     from sb_obs import runs
-    from sb_support.app import answer
 
     records: list = []
     monkeypatch.setattr(runs, "emit", records.append)
-    reply = await answer(agent_saying("hi"), "hello?")
-    assert (reply.text, reply.escalation) == ("hi", None)
+    client = fake_client()
+    event = {"channel": "C1", "ts": "1.1", "text": "<@U0BOT> hello?"}
+    await handle_event(event, client, SupportCore(agent_saying("hi")))
+    assert client.chat_postMessage.await_args.kwargs["text"] == "hi"
     assert (records[0].agent, records[0].caller, records[0].outcome) == (
         "sb-support",
         "slack",
@@ -108,13 +116,13 @@ async def test_answer_emits_run_record(monkeypatch: pytest.MonkeyPatch) -> None:
 async def test_usage_limit_gets_a_specific_reply(monkeypatch: pytest.MonkeyPatch) -> None:
     from pydantic_ai.usage import UsageLimits
 
-    from sb_support import app
+    from sb_support import core
 
-    monkeypatch.setattr(app, "USAGE_LIMITS", UsageLimits(total_tokens_limit=1))
+    monkeypatch.setattr(core, "USAGE_LIMITS", UsageLimits(total_tokens_limit=1))
     client = fake_client()
     event = {"channel": "C1", "ts": "1.1", "text": "<@U0BOT> big question"}
 
-    await handle_mention(event, client, agent_saying("a long answer"))
+    await handle_event(event, client, SupportCore(agent_saying("a long answer")))
 
     assert "more work than I'm allowed" in client.chat_postMessage.await_args.kwargs["text"]
     client.reactions_add.assert_any_await(channel="C1", timestamp="1.1", name="x")

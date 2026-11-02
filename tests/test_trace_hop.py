@@ -22,7 +22,7 @@ def test_slack_question_is_one_trace_across_the_a2a_hop() -> None:
     logs = [json.loads(line) for line in proc.stderr.splitlines() if line.startswith("{")]
 
     by_name = {s["name"]: s["trace"] for s in out["spans"]}
-    root = by_name["slack app_mention"]
+    root = by_name["support message slack"]
     # Both agents' spans, the A2A server span, and docs-agent's tool calls: one trace.
     for name in (
         "agent_run sb-support",

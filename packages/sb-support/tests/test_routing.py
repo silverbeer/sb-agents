@@ -9,7 +9,8 @@ from pydantic_ai.messages import ModelRequest, UserPromptPart
 from pydantic_ai.models.test import TestModel
 
 from sb_support.agent import build_agent
-from sb_support.app import ThreadMemory, answer, handle_mention, is_follow_up
+from sb_support.core import ConversationMemory, SupportCore, answer
+from sb_support.slack import handle_event, is_follow_up
 from sb_support.specialists import Specialist, SpecialistAnswer, SpecialistError, discover
 
 BASE = "http://127.0.0.1:8101"
@@ -100,7 +101,7 @@ async def test_low_confidence_escalates_with_mention(
     slack = fake_slack()
     event = {"channel": "C1", "ts": "1.1", "text": "<@U0BOT> who is on call?"}
 
-    await handle_mention(event, slack, routed_agent(StubClient("low")))
+    await handle_event(event, slack, SupportCore(routed_agent(StubClient("low"))))
 
     text = slack.chat_postMessage.await_args.kwargs["text"]
     assert "Escalating to <@U0HUMAN>: docs-agent wasn't confident" in text
@@ -126,7 +127,7 @@ async def test_small_talk_without_tools_is_not_escalated(emitted: list) -> None:
 
 
 async def test_follow_up_sees_the_thread_history(emitted: list) -> None:
-    memory = ThreadMemory()
+    memory = ConversationMemory()
     agent = routed_agent(StubClient())
     await answer(agent, "how do I deploy MT?", memory, "t1")
     await answer(agent, "and roll it back?", memory, "t1")
@@ -143,7 +144,7 @@ async def test_follow_up_sees_the_thread_history(emitted: list) -> None:
 
 
 def test_memory_trims_whole_runs_and_old_threads() -> None:
-    memory = ThreadMemory(max_threads=2, max_runs=2)
+    memory = ConversationMemory(max_conversations=2, max_runs=2)
     for i in range(3):
         memory.add("t1", [ModelRequest(parts=[UserPromptPart(content=f"q{i}")])])
     assert [m.parts[0].content for m in memory.history("t1")] == ["q1", "q2"]
@@ -155,15 +156,16 @@ def test_memory_trims_whole_runs_and_old_threads() -> None:
 @pytest.mark.parametrize(
     ("event", "expected"),
     [
-        ({"thread_ts": "t1", "text": "and then?"}, True),
-        ({"thread_ts": "t1", "text": "<@UBOT> and then?"}, False),  # app_mention handles it
-        ({"thread_ts": "t9", "text": "unrelated thread"}, False),
-        ({"text": "top-level message"}, False),
-        ({"thread_ts": "t1", "text": "x", "bot_id": "B1"}, False),
-        ({"thread_ts": "t1", "text": "x", "subtype": "message_changed"}, False),
+        ({"channel": "C1", "thread_ts": "t1", "text": "and then?"}, True),
+        ({"channel": "C1", "thread_ts": "t1", "text": "<@UBOT> and then?"}, False),  # mention
+        ({"channel": "C1", "thread_ts": "t9", "text": "unrelated thread"}, False),
+        ({"channel": "C2", "thread_ts": "t1", "text": "same ts, other channel"}, False),
+        ({"channel": "C1", "text": "top-level message"}, False),
+        ({"channel": "C1", "thread_ts": "t1", "text": "x", "bot_id": "B1"}, False),
+        ({"channel": "C1", "thread_ts": "t1", "text": "x", "subtype": "message_changed"}, False),
     ],
 )
 def test_is_follow_up(event: dict, expected: bool) -> None:
-    memory = ThreadMemory()
-    memory.add("t1", [])
-    assert is_follow_up(event, memory, "UBOT") is expected
+    core = SupportCore(build_agent(TestModel()))
+    core.memory.add("slack:C1:t1", [])
+    assert is_follow_up(event, core, "UBOT") is expected
