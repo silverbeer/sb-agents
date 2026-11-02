@@ -33,4 +33,4 @@ target-version = "py313"
 select = ["E", "F", "I", "B", "UP"]
 
 [tool.ruff.lint.isort]
-known-first-party = ["sb_support", "docs_agent", "adk_docs_client", "sb_obs"]
+known-first-party = ["sb_support", "docs_agent", "adk_docs_client", "mt_agent", "sb_obs"]

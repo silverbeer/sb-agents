@@ -4,13 +4,20 @@
 card (`/.well-known/agent-card.json`) is fetched, and its name, description and skill
 examples become one sb-support tool. Adding a specialist is a URL, not code.
 
-A specialist's result artifact carries a text part (what a Slack reply wants) and,
-from PydanticAI agents, a data part with the structured output. `confidence` is read
-from the data part when present; sb-support escalates on "low".
+A specialist's result artifact carries a text part (what a Slack reply wants) and a
+data part `{confidence, sources, ...}`. `confidence` is read from the data part when
+present; sb-support escalates on "low".
+
+The client speaks A2A 1.0 JSON-RPC (`SendStreamingMessage`, `A2A-Version: 1.0`), which
+both servers in use answer the same way: fasta2a (docs-agent) and a2a-sdk (ADK's
+`to_a2a`, mt-agent). The older `message/stream` name gets a different shape from each:
+a2a-sdk treats a request without the version header as A2A 0.3 and answers with
+`kind`-tagged events; fasta2a with 1.0 objects but 0.3 enums. See docs/notes/mt-agent.md.
 """
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import re
@@ -19,15 +26,15 @@ from dataclasses import dataclass, field
 from typing import Any
 
 import httpx
-from fasta2a.client import A2AClient
-from fasta2a.schema import Message, Part
 
 from sb_obs import traced_http_client
 
 log = logging.getLogger("sb_support.specialists")
 
-DEFAULT_URLS = "http://127.0.0.1:8101"  # docs-agent
+DEFAULT_URLS = "http://127.0.0.1:8101,http://127.0.0.1:8102"  # docs-agent, mt-agent
 CARD_PATH = "/.well-known/agent-card.json"
+A2A_VERSION = "1.0"
+FAILED_STATES = ("TASK_STATE_FAILED", "TASK_STATE_REJECTED", "TASK_STATE_CANCELED")
 
 
 class SpecialistError(RuntimeError):
@@ -43,7 +50,11 @@ class SpecialistAnswer:
 
 @dataclass
 class SpecialistClient:
-    """fasta2a A2A client. Uses `message/stream`: fasta2a's server has no blocking send."""
+    """A2A 1.0 client: `SendStreamingMessage`, read until the result artifact arrives.
+
+    Streaming, not `SendMessage`: fasta2a's server has no blocking send (it returns
+    `submitted`). Events are `{"result": {"task"|"message"|"statusUpdate"|"artifactUpdate"}}`.
+    """
 
     url: str
     http_client: httpx.AsyncClient | None = None
@@ -52,33 +63,76 @@ class SpecialistClient:
     async def ask(self, question: str) -> SpecialistAnswer:
         url = self.url.rstrip("/")
         http = self.http_client or traced_http_client(timeout=self.timeout_s)
-        client = A2AClient(url, http_client=http)
-        message = Message(role="user", parts=[Part(text=question)], message_id=uuid.uuid4().hex)
-        text: str | None = None
-        data: dict[str, Any] | None = None
+        request = {
+            "jsonrpc": "2.0",
+            "id": uuid.uuid4().hex,
+            "method": "SendStreamingMessage",
+            "params": {
+                "message": {
+                    "messageId": uuid.uuid4().hex,
+                    "role": "ROLE_USER",
+                    "parts": [{"text": question}],
+                }
+            },
+        }
+        headers = {"A2A-Version": A2A_VERSION, "Accept": "text/event-stream"}
+        answer = _Answer()
         try:
-            async for response in client.stream_message(message):
-                if "error" in response:
-                    raise SpecialistError(response["error"].get("message", "A2A error"))
-                result = response["result"]
-                if update := result.get("artifact_update"):
-                    for part in update["artifact"]["parts"]:
-                        if "text" in part and text is None:
-                            text = part["text"]
-                        elif "data" in part:
-                            data = part["data"].get("result", part["data"])
-                if status := result.get("status_update"):
-                    if status["status"]["state"] in ("failed", "rejected", "canceled"):
-                        raise SpecialistError(f"task {status['status']['state']}")
+            async with http.stream("POST", url + "/", json=request, headers=headers) as response:
+                if response.status_code >= 400:
+                    await response.aread()
+                    raise SpecialistError(f"HTTP {response.status_code}: {response.text[:200]}")
+                if "text/event-stream" not in response.headers.get("content-type", ""):
+                    await response.aread()  # a JSON-RPC error comes back as plain JSON
+                    answer.read(response.json())
+                async for line in response.aiter_lines():
+                    if line.startswith("data:"):
+                        answer.read(json.loads(line[5:]))
         except httpx.HTTPError as exc:
             raise SpecialistError(f"unreachable at {url}: {exc}") from exc
+        except ValueError as exc:
+            raise SpecialistError(f"unreadable A2A response: {exc}") from exc
         finally:
             if self.http_client is None:
                 await http.aclose()
-        if text is None:
+        if answer.text is None:
             raise SpecialistError("returned no answer")
+        data = answer.data
         confidence = data.get("confidence") if isinstance(data, dict) else None
-        return SpecialistAnswer(text=text, confidence=confidence, data=data)
+        return SpecialistAnswer(text=answer.text, confidence=confidence, data=data)
+
+
+@dataclass
+class _Answer:
+    """Folds A2A 1.0 stream events into the first text part and the last data part."""
+
+    text: str | None = None
+    data: dict[str, Any] | None = None
+
+    def read(self, event: dict[str, Any]) -> None:
+        if error := event.get("error"):
+            raise SpecialistError(error.get("message", "A2A error"))
+        result = event.get("result") or {}
+        if update := result.get("artifactUpdate"):
+            self._parts(update["artifact"].get("parts") or [])
+        if message := result.get("message"):  # a reply without a task
+            self._parts(message.get("parts") or [])
+        task = result.get("task") or {}
+        for artifact in task.get("artifacts") or []:
+            self._parts(artifact.get("parts") or [])
+        status = (result.get("statusUpdate") or task).get("status") or {}
+        if status.get("state") in FAILED_STATES:
+            parts = (status.get("message") or {}).get("parts") or []
+            why = next((p["text"] for p in parts if "text" in p), "")
+            raise SpecialistError(f"task {status['state']}" + (f": {why[:200]}" if why else ""))
+
+    def _parts(self, parts: list[dict[str, Any]]) -> None:
+        for part in parts:
+            if "text" in part and self.text is None:
+                self.text = part["text"]
+            elif isinstance(part.get("data"), dict):
+                # fasta2a wraps structured output as {"result": {...}}; ADK sends it bare.
+                self.data = part["data"].get("result", part["data"])
 
 
 @dataclass

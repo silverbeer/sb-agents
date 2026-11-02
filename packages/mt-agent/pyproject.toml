@@ -1,0 +1,21 @@
+[project]
+name = "mt-agent"
+version = "0.1.0"
+description = "ADK specialist that answers questions from MissingTable data (mt-mcp), served over A2A"
+requires-python = ">=3.13"
+dependencies = [
+    "sb-obs",
+    "google-adk[a2a,mcp]>=2.13",  # mcp: McpToolset (mt-mcp tools)
+    "anthropic>=0.78",
+    "uvicorn>=0.30",
+]
+
+[project.scripts]
+mt-agent-a2a = "mt_agent.a2a_server:main"
+
+[tool.uv.sources]
+sb-obs = { workspace = true }
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

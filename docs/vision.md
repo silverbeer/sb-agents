@@ -44,9 +44,11 @@ shared in-process agent interface.
 `{confidence, sources}`. Nothing outside the agent's package imports its framework.
 A caller works the same against a PydanticAI or an ADK specialist.
 
-**Status:** half done. ADK → PydanticAI works (adk-docs-client → docs-agent). PydanticAI →
-ADK arrives with mt-agent (SB-1493). The `{confidence, sources}` data part is a docs-agent
-convention today; mt-agent makes it the written contract.
+**Status:** both directions work. ADK → PydanticAI (adk-docs-client → docs-agent) and
+PydanticAI → ADK (sb-support → mt-agent, SB-1493). sb-support's client speaks A2A 1.0
+(`SendStreamingMessage`, `A2A-Version: 1.0`) and handles both fasta2a and a2a-sdk servers;
+both agents reply with text + a `{confidence, sources}` data part
+(docs/notes/mt-agent.md).
 
 ## 4. Local-first
 

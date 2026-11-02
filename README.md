@@ -19,6 +19,7 @@ uv workspace, one package per agent:
 | `packages/sb-support` | PydanticAI + Slack Bolt | Front door: a channel-neutral core (`core.py`) routes to A2A specialists discovered from their agent cards and escalates when one is unsure; Slack (`slack.py`, Socket Mode) is the first channel adapter |
 | `packages/docs-agent` | PydanticAI + fasta2a | Answers from SB repo markdown docs, with citations and confidence; served over A2A |
 | `packages/adk-docs-client` | ADK | Router `LlmAgent` that delegates docs questions to docs-agent via `RemoteA2aAgent` |
+| `packages/mt-agent` | ADK + a2a-sdk (`to_a2a`) | Answers questions about MissingTable teams, matches and standings from mt-mcp tools; served over A2A, so sb-support reaches it like docs-agent |
 | `packages/sb-obs` | OpenTelemetry | Shared `setup_telemetry(service)`: traces, metrics, GCP-format JSON logs |
 
 More agents (infra, change, ticket, triage) land as sibling packages.
@@ -72,6 +73,22 @@ op run --env-file=.env.op -- uv run adk-docs-client "How do I release the Androi
 ```
 
 What broke and why: [docs/notes/a2a-first-hop.md](docs/notes/a2a-first-hop.md).
+
+## mt-agent (ADK, PydanticAI → ADK hop)
+
+```bash
+make mt-a2a                                   # :8102, tools from mt-mcp (MT_MCP_URL)
+SB_SUPPORT_SPECIALISTS=http://127.0.0.1:8101,http://127.0.0.1:8102 make support
+```
+
+| Env | Source |
+|---|---|
+| `MT_AGENT_MCP_TOKEN` | `op://agents/mt-agent/token` (mt-mcp bearer, a public read-only MT account) |
+| `MT_MCP_URL` | optional, default `https://api.missingtable.com/mcp/` |
+| `MT_AGENT_MODEL` | optional, default `claude-haiku-5-5` (ADK agents are Claude-only for now) |
+| `MT_AGENT_PORT` | optional, default `8102` |
+
+Design, reply contract and auth phases: [docs/notes/mt-agent.md](docs/notes/mt-agent.md).
 Routing, escalation and thread follow-ups: [docs/notes/sb-support-routing.md](docs/notes/sb-support-routing.md).
 
 ## Observability

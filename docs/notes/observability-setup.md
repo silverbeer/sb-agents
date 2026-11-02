@@ -113,7 +113,8 @@ Both A2A clients now produce a single trace with docs-agent:
 | Hop | Client | How the trace crosses | Verified |
 |---|---|---|---|
 | ADK router → docs-agent | a2a-sdk via `RemoteA2aAgent` | httpx instrumentation injects `traceparent` | live (Tempo) |
-| sb-support → docs-agent | fasta2a `A2AClient` (`sb_support.specialists`) | `sb_obs.traced_http_client` injects in a request hook; httpx instrumentation also does on real transports | automated (`tests/test_trace_hop.py`) and live |
+| sb-support → docs-agent | A2A 1.0 JSON-RPC client (`sb_support.specialists`) | `sb_obs.traced_http_client` injects in a request hook; httpx instrumentation also does on real transports | automated (`tests/test_trace_hop.py`) and live |
+| sb-support → mt-agent → mt-mcp | same client; ADK `McpToolset` to MCP | A2A: same hook. MCP: the mcp SDK puts `traceparent` in the request's `_meta` and its server middleware continues it | automated (`tests/test_trace_hop.py`, servers in an empty OTel context) |
 
 On the server, `instrument_asgi` (ASGI middleware) continues the incoming trace.
 
@@ -132,7 +133,8 @@ On the server, `instrument_asgi` (ASGI middleware) continues the incoming trace.
   client's contract, so it holds over `ASGITransport` in tests and doesn't depend
   on someone remembering to instrument at work.
 - **fasta2a's server has no blocking `message/send`** (it returns `submitted`), so
-  the client uses `message/stream` and waits for the final artifact, like ADK does.
+  the client streams (`SendStreamingMessage` since SB-1493) and waits for the final
+  artifact, like ADK does.
 - Not automated: the ADK hop over a real socket. It was verified live in SB-1478;
   an in-process test would test our hook, not ADK's client.
 

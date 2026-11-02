@@ -1,7 +1,7 @@
 # Local observability stack: grafana/otel-lgtm (OTel Collector, Tempo, Loki,
 # Prometheus, Grafana in one container). Dev/demo only, per Grafana.
 #   make obs-up    then open http://localhost:3000 (admin/admin)
-#   make docs-a2a / support / ask Q="..."   run an agent exporting to it
+#   make docs-a2a / mt-a2a / support / ask Q="..."   run an agent exporting to it
 
 LGTM_IMAGE ?= grafana/otel-lgtm:0.37.0
 LGTM_NAME  ?= sb-otel-lgtm
@@ -10,7 +10,7 @@ OBS_ENV    := OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318 \
               SB_OBS_CAPTURE_CONTENT=$(or $(SB_OBS_CAPTURE_CONTENT),1) \
               PYDANTIC_AI_NO_BANNER=1
 
-.PHONY: obs-up obs-down obs-logs dashboards eval docs-a2a support ask adk-ask test lint
+.PHONY: obs-up obs-down obs-logs dashboards eval docs-a2a mt-a2a support ask adk-ask test lint
 
 GRAFANA_DIR := $(CURDIR)/observability/grafana
 PROVISIONING := /otel-lgtm/grafana/conf/provisioning
@@ -56,6 +56,11 @@ obs-logs:
 
 docs-a2a:
 	$(OBS_ENV) $(OP) uv run docs-agent-a2a
+
+# mt-agent on :8102. Reach it from sb-support with
+#   make support finds docs-agent (:8101) and mt-agent (:8102) by default; unreachable ones are skipped
+mt-a2a:
+	$(OBS_ENV) op run --env-file=.env.op --env-file=.env.mt.op -- uv run mt-agent-a2a
 
 support:
 	$(OBS_ENV) $(OP) uv run sb-support

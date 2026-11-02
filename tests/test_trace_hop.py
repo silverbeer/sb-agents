@@ -42,3 +42,39 @@ def test_slack_question_is_one_trace_across_the_a2a_hop() -> None:
     records = {r["agent"]: r for r in logs if r.get("event") == "agent_run"}
     assert records["sb-support"]["trace_id"] == records["docs-agent"]["trace_id"] == root
     assert records["docs-agent"]["caller"] == "a2a"
+
+
+MT_SCENARIO = Path(__file__).with_name("mt_hop_scenario.py")
+
+
+def test_slack_question_is_one_trace_through_adk_mt_agent_to_mcp() -> None:
+    """PydanticAI → ADK (SB-1493): sb-support → mt-agent → mt-mcp, each server isolated."""
+    proc = subprocess.run(
+        [sys.executable, str(MT_SCENARIO)],
+        capture_output=True,
+        text=True,
+        env={"PATH": "/usr/bin:/bin", "PYDANTIC_AI_NO_BANNER": "1"},
+        check=False,
+        timeout=60,
+    )
+    assert proc.returncode == 0, proc.stderr[-3000:]
+    out = json.loads(proc.stdout.strip().splitlines()[-1])
+    logs = [json.loads(line) for line in proc.stderr.splitlines() if line.startswith("{")]
+
+    by_name = {s["name"]: s["trace"] for s in out["spans"]}
+    root = by_name["support message slack"]
+    for name in (
+        "execute_tool ask_mt_agent",
+        "POST /",  # mt-agent's ASGI server span: continued from traceparent
+        "agent_run mt-agent",
+        "invoke_agent mt_agent",
+        "execute_tool search_teams",
+        "tools/call search_teams",  # the MCP server's span: continued from _meta
+    ):
+        assert by_name.get(name) == root, (name, sorted(by_name))
+
+    records = {r["agent"]: r for r in logs if r.get("event") == "agent_run"}
+    assert records["sb-support"]["trace_id"] == records["mt-agent"]["trace_id"] == root
+    assert records["mt-agent"]["caller"] == "a2a"
+    assert records["mt-agent"]["confidence"] == "high"
+    assert records["sb-support"]["routed_to"] == "mt-agent"
