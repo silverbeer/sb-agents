@@ -1,7 +1,12 @@
 # sb-agents
 
-SB support + alert-triage agents, built to learn **Google ADK**, **PydanticAI** and
-**A2A** before building the same thing at work.
+A small agent platform: messaging-, model- and framework-agnostic, local-first,
+multi-agent over A2A, observable. MissingTable is the first user; the same pieces
+carry over to work (Slack support, alert triage). Built to learn **Google ADK**,
+**PydanticAI** and **A2A**.
+
+**Read [docs/vision.md](docs/vision.md) first:** the six pillars, the check each PR is
+held to, and where the code stands.
 
 Epic: [AGT — Support & Triage Agents](https://linear.app/silverbeer/project/agt-support-and-triage-agents-1f1a2497e0f9)
 
@@ -11,7 +16,7 @@ uv workspace, one package per agent:
 
 | Package | Framework | What |
 |---|---|---|
-| `packages/sb-support` | PydanticAI + Slack Bolt | Answers @mentions and thread follow-ups (Socket Mode); routes to A2A specialists discovered from their agent cards; escalates when a specialist is unsure |
+| `packages/sb-support` | PydanticAI + Slack Bolt | Front door: a channel-neutral core (`core.py`) routes to A2A specialists discovered from their agent cards and escalates when one is unsure; Slack (`slack.py`, Socket Mode) is the first channel adapter |
 | `packages/docs-agent` | PydanticAI + fasta2a | Answers from SB repo markdown docs, with citations and confidence; served over A2A |
 | `packages/adk-docs-client` | ADK | Router `LlmAgent` that delegates docs questions to docs-agent via `RemoteA2aAgent` |
 | `packages/sb-obs` | OpenTelemetry | Shared `setup_telemetry(service)`: traces, metrics, GCP-format JSON logs |
