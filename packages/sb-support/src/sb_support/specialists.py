@@ -104,7 +104,7 @@ class SpecialistClient:
 
 @dataclass
 class _Answer:
-    """Folds A2A 1.0 stream events into the first text part and the last data part."""
+    """Folds A2A 1.0 stream events into the first non-empty text and the last data part."""
 
     text: str | None = None
     data: dict[str, Any] | None = None
@@ -127,10 +127,14 @@ class _Answer:
             raise SpecialistError(f"task {status['state']}" + (f": {why[:200]}" if why else ""))
 
     def _parts(self, parts: list[dict[str, Any]]) -> None:
+        # The first artifact (or message) with real text wins; its non-empty text parts
+        # are joined. ADK can lead with an empty text part (Claude's empty block before
+        # the answer), so "first text part" would read as an empty answer.
+        texts = [p["text"] for p in parts if isinstance(p.get("text"), str) and p["text"].strip()]
+        if texts and self.text is None:
+            self.text = "\n".join(texts)
         for part in parts:
-            if "text" in part and self.text is None:
-                self.text = part["text"]
-            elif isinstance(part.get("data"), dict):
+            if isinstance(part.get("data"), dict):
                 # fasta2a wraps structured output as {"result": {...}}; ADK sends it bare.
                 self.data = part["data"].get("result", part["data"])
 

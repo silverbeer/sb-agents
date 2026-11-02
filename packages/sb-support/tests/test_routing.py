@@ -169,3 +169,39 @@ def test_is_follow_up(event: dict, expected: bool) -> None:
     core = SupportCore(build_agent(TestModel()))
     core.memory.add("slack:C1:t1", [])
     assert is_follow_up(event, core, "UBOT") is expected
+
+
+# --- A2A answer parsing (live bug, 2026-11-02) ---------------------------------------
+
+
+def test_answer_skips_empty_text_parts_from_adk() -> None:
+    """mt-agent (ADK) sent ["", "real answer", data]; the client returned "" to Slack."""
+    from sb_support.specialists import _Answer
+
+    answer = _Answer()
+    answer.read(
+        {
+            "result": {
+                "artifactUpdate": {
+                    "artifact": {
+                        "parts": [
+                            {"text": ""},
+                            {"text": "IFA U15's next match is Saturday."},
+                            {"data": {"confidence": "high", "sources": ["get_upcoming_matches"]}},
+                        ]
+                    }
+                }
+            }
+        }
+    )
+    assert answer.text == "IFA U15's next match is Saturday."
+    assert answer.data == {"confidence": "high", "sources": ["get_upcoming_matches"]}
+
+
+def test_answer_keeps_the_first_artifact_with_text() -> None:
+    from sb_support.specialists import _Answer
+
+    answer = _Answer()
+    answer.read({"result": {"artifactUpdate": {"artifact": {"parts": [{"text": "first"}]}}}})
+    answer.read({"result": {"task": {"artifacts": [{"parts": [{"text": "again"}]}], "status": {}}}})
+    assert answer.text == "first"
