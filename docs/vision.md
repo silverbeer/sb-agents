@@ -30,9 +30,10 @@ never a provider SDK.
 No default changes without an eval showing it holds (docs/notes/model-comparison.md).
 
 **Status:** done for PydanticAI agents (Anthropic, OpenRouter, Ollama all ran unchanged).
-Gaps: the ADK router is pinned to `AnthropicLlm` because ADK's LiteLLM range conflicts with
-PydanticAI's `openai` version (SB-1490); `sb_obs.price()` assumes the Anthropic provider
-unless told otherwise.
+Gaps: ADK agents are Claude-only for now (decided 2026-11-02): ADK reaches other models
+only through LiteLLM, whose allowed range conflicts with PydanticAI's `openai` version
+(SB-1490). Revisit when ADK lifts its LiteLLM cap. `sb_obs.price()` assumes the Anthropic
+provider unless told otherwise.
 
 ## 3. Framework-independent
 
@@ -55,7 +56,7 @@ model APIs.
 **Check:** the whole stack (agents, Grafana/Loki/Tempo/Prometheus, evals) starts from
 this repo on the mini. Secrets come from 1Password, never from files in the repo.
 
-**Proposed definition, pending a decision:** local models (Ollama) where latency doesn't
+**Definition (decided 2026-11-02):** local models (Ollama) where latency doesn't
 matter (evals, batch, triage summaries); hosted models allowed for interactive chat.
 Measured: local gemma4:12b 11/14 at ~100 s per question, vs Haiku 14/14 at ~5 s.
 
@@ -96,7 +97,9 @@ recorded.
 | MT Chat | MT's `/api/ai/chat` becomes an adapter into this core | SB-1500 |
 | MT agents | one MT data agent; split only for a real boundary (data, credentials, model, owner, framework) | SB-1493 |
 | Cost tracking | genai-prices, pinned in tests; RunRecord per run | SB-1484 |
-| Local-first meaning | **pending** (see pillar 4) | — |
+| Local-first meaning | local models for latency-tolerant work; hosted allowed for chat | pillar 4 |
+| ADK model path | Claude-only until ADK lifts its LiteLLM cap | SB-1490 |
+| Who is asking | the end user's identity flows to the data layer (MT tools run as the user, not a service account) | SB-1493 |
 
 ## Not part of the platform
 
