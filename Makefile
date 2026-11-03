@@ -10,7 +10,7 @@ OBS_ENV    := OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318 \
               SB_OBS_CAPTURE_CONTENT=$(or $(SB_OBS_CAPTURE_CONTENT),1) \
               PYDANTIC_AI_NO_BANNER=1
 
-.PHONY: obs-up obs-down obs-logs dashboards eval docs-a2a mt-a2a support ask adk-ask test lint
+.PHONY: obs-up obs-down obs-logs dashboards eval docs-a2a mt-a2a support ask adk-ask test lint deploy deploy-apply
 
 GRAFANA_DIR := $(CURDIR)/observability/grafana
 PROVISIONING := /otel-lgtm/grafana/conf/provisioning
@@ -80,3 +80,11 @@ test:
 
 lint:
 	uv run ruff check . && uv run ruff format --check .
+
+# k3s on the mini (SB-1481): build into k3s's containerd, provision secrets, roll out.
+# See docs/notes/deploy-k3s.md.
+deploy:
+	bash k3s/deploy.sh
+
+deploy-apply:
+	bash k3s/deploy.sh --skip-build

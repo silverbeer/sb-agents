@@ -1,0 +1,65 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sb-support
+  namespace: sb-agents
+  labels: {app: sb-support}
+spec:
+  replicas: 1
+  # One Socket Mode connection and one in-memory conversation store at a time.
+  strategy: {type: Recreate}
+  selector:
+    matchLabels: {app: sb-support}
+  template:
+    metadata:
+      labels: {app: sb-support}
+    spec:
+      # No Docker-style service env vars: a Service named mt-agent would inject
+      # MT_AGENT_PORT=tcp://..., which is mt-agent's own port setting.
+      enableServiceLinks: false
+      hostAliases:
+      - ip: 192.168.5.2
+        hostnames: [host.lima.internal]
+      # Specialists are discovered once, at startup: wait for their agent cards so a
+      # node restart (all pods at once) doesn't start the bot with no specialists.
+      # Fails after 180s; kubelet retries, and the pod shows Init:Error, not a silent bot.
+      initContainers:
+      - name: wait-for-specialists
+        image: sb-agents:IMAGE_TAG
+        imagePullPolicy: Never
+        command:
+        - python
+        - -c
+        - |
+          import os, time, urllib.request
+          urls = os.environ["SB_SUPPORT_SPECIALISTS"].split(",")
+          deadline = time.time() + 180
+          while time.time() < deadline:
+              try:
+                  for u in urls:
+                      urllib.request.urlopen(u + "/.well-known/agent-card.json", timeout=3)
+                  break
+              except OSError:
+                  time.sleep(3)
+          else:
+              raise SystemExit("specialists not ready after 180s")
+        env:
+        - {name: SB_SUPPORT_SPECIALISTS, value: "http://docs-agent.sb-agents.svc.cluster.local:8101,http://mt-agent.sb-agents.svc.cluster.local:8102"}
+        resources:
+          requests: {cpu: 10m, memory: 32Mi}
+          limits: {memory: 128Mi}
+      containers:
+      - name: sb-support
+        image: sb-agents:IMAGE_TAG
+        imagePullPolicy: Never
+        command: [sb-support]
+        envFrom:
+        - secretRef: {name: sb-support}
+        env:
+        - {name: OTEL_EXPORTER_OTLP_ENDPOINT, value: "http://host.lima.internal:4318"}
+        - {name: SB_ENV, value: homelab}
+        - {name: SB_OBS_CAPTURE_CONTENT, value: "1"}
+        - {name: SB_SUPPORT_SPECIALISTS, value: "http://docs-agent.sb-agents.svc.cluster.local:8101,http://mt-agent.sb-agents.svc.cluster.local:8102"}
+        resources:
+          requests: {cpu: 50m, memory: 192Mi}
+          limits: {memory: 768Mi}

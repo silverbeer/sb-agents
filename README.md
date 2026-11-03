@@ -43,6 +43,13 @@ Evals use `pydantic-evals`: cited-expected-source, low confidence on unanswerabl
 questions, and an LLM judge (`DOCS_AGENT_JUDGE_MODEL`, default Sonnet) against a
 reference answer. They call the real model, so they are not in CI.
 
+## Deployed (always on)
+
+docs-agent, mt-agent and sb-support run in k3s on the mini (`rancher-desktop`,
+namespace `sb-agents`). `make deploy` builds and rolls out; details, traps and
+rotation in [docs/notes/deploy-k3s.md](docs/notes/deploy-k3s.md). Scale
+`deploy/sb-support` to 0 before running `make support` locally.
+
 ## Run locally
 
 Secrets live in 1Password and are injected at runtime by `op run`. `.env.op` holds
