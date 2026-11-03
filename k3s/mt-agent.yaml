@@ -33,8 +33,10 @@ spec:
         - {name: SB_OBS_CAPTURE_CONTENT, value: "1"}
         - {name: MT_AGENT_HOST, value: 0.0.0.0}
         - {name: MT_AGENT_A2A_URL, value: "http://mt-agent.sb-agents.svc.cluster.local:8102"}
+        # TCP, not GET /.well-known/agent-card.json: every HTTP probe becomes a trace
+        # (~8.6k/day per agent at 10s) that fills Tempo with noise.
         readinessProbe:
-          httpGet: {path: /.well-known/agent-card.json, port: a2a}
+          tcpSocket: {port: a2a}
           periodSeconds: 10
         livenessProbe:
           tcpSocket: {port: a2a}
