@@ -1,0 +1,60 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: docs-agent
+  namespace: sb-agents
+  labels: {app: docs-agent}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: docs-agent}
+  template:
+    metadata:
+      labels: {app: docs-agent}
+    spec:
+      hostAliases:
+      - ip: 192.168.5.2
+        hostnames: [host.lima.internal]
+      containers:
+      - name: docs-agent
+        image: sb-agents:IMAGE_TAG
+        imagePullPolicy: Never
+        command: [docs-agent-a2a]
+        ports:
+        - {name: a2a, containerPort: 8101}
+        envFrom:
+        - secretRef: {name: docs-agent}
+        env:
+        - {name: OTEL_EXPORTER_OTLP_ENDPOINT, value: "http://host.lima.internal:4318"}
+        - {name: SB_ENV, value: homelab}
+        - {name: SB_OBS_CAPTURE_CONTENT, value: "1"}
+        - {name: DOCS_AGENT_A2A_HOST, value: 0.0.0.0}
+        - {name: DOCS_AGENT_A2A_URL, value: "http://docs-agent.sb-agents.svc.cluster.local:8101"}
+        - {name: DOCS_AGENT_ROOT, value: /gitrepos}
+        readinessProbe:
+          httpGet: {path: /.well-known/agent-card.json, port: a2a}
+          periodSeconds: 10
+        livenessProbe:
+          tcpSocket: {port: a2a}
+          initialDelaySeconds: 30
+          periodSeconds: 30
+        resources:
+          requests: {cpu: 50m, memory: 192Mi}
+          limits: {memory: 768Mi}
+        volumeMounts:
+        - {name: gitrepos, mountPath: /gitrepos, readOnly: true}
+      volumes:
+      # The Mac's repos, shared into the Rancher VM; read-only. docs-agent indexes
+      # them at startup: `kubectl rollout restart` to pick up doc changes.
+      - name: gitrepos
+        hostPath: {path: /Users/silverbeer/gitrepos, type: Directory}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: docs-agent
+  namespace: sb-agents
+spec:
+  selector: {app: docs-agent}
+  ports:
+  - {name: a2a, port: 8101, targetPort: a2a}

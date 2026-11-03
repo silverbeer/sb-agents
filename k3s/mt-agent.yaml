@@ -1,0 +1,52 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mt-agent
+  namespace: sb-agents
+  labels: {app: mt-agent}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: mt-agent}
+  template:
+    metadata:
+      labels: {app: mt-agent}
+    spec:
+      hostAliases:
+      - ip: 192.168.5.2
+        hostnames: [host.lima.internal]
+      containers:
+      - name: mt-agent
+        image: sb-agents:IMAGE_TAG
+        imagePullPolicy: Never
+        command: [mt-agent-a2a]
+        ports:
+        - {name: a2a, containerPort: 8102}
+        envFrom:
+        - secretRef: {name: mt-agent}
+        env:
+        - {name: OTEL_EXPORTER_OTLP_ENDPOINT, value: "http://host.lima.internal:4318"}
+        - {name: SB_ENV, value: homelab}
+        - {name: SB_OBS_CAPTURE_CONTENT, value: "1"}
+        - {name: MT_AGENT_HOST, value: 0.0.0.0}
+        - {name: MT_AGENT_A2A_URL, value: "http://mt-agent.sb-agents.svc.cluster.local:8102"}
+        readinessProbe:
+          httpGet: {path: /.well-known/agent-card.json, port: a2a}
+          periodSeconds: 10
+        livenessProbe:
+          tcpSocket: {port: a2a}
+          initialDelaySeconds: 30
+          periodSeconds: 30
+        resources:
+          requests: {cpu: 50m, memory: 192Mi}
+          limits: {memory: 768Mi}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mt-agent
+  namespace: sb-agents
+spec:
+  selector: {app: mt-agent}
+  ports:
+  - {name: a2a, port: 8102, targetPort: a2a}
