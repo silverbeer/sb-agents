@@ -29,11 +29,18 @@ never a provider SDK.
 **Check:** switching an agent's model is an env var plus an eval run, with no code change.
 No default changes without an eval showing it holds (docs/notes/model-comparison.md).
 
-**Status:** done for PydanticAI agents (Anthropic, OpenRouter, Ollama all ran unchanged).
-Gaps: ADK agents are Claude-only for now (decided 2026-11-02): ADK reaches other models
-only through LiteLLM, whose allowed range conflicts with PydanticAI's `openai` version
-(SB-1490). Revisit when ADK lifts its LiteLLM cap. `sb_obs.price()` assumes the Anthropic
-provider unless told otherwise.
+**Status** (section D of the platform assessment, 2026-11-03; SB-1518):
+
+| Criterion | State | Where |
+|---|---|---|
+| Provider abstraction | 🟡 PydanticAI agents: any provider by config. ADK agents: Claude-only until ADK lifts its LiteLLM cap (SB-1490); the registry refuses others with that reason | framework model interfaces |
+| Model selection | 🟢 one registry; each agent's default + env var (`DOCS_AGENT_MODEL`, `SB_SUPPORT_MODEL`, `MT_AGENT_MODEL`, ...) | `packages/sb-models/src/sb_models/models.toml` |
+| Capabilities / metadata | 🟢 context window, tools, structured output, local/hosted, credential, last eval; checked at startup against what the agent needs | `sb_models.resolve()` |
+| Credentials | 🟢 per provider (`ANTHROPIC_API_KEY`, `OPENROUTER_API_KEY`, `OLLAMA_BASE_URL`), checked at startup; 1Password refs locally, one Secret per Deployment in k3s | `k3s/provision-secret.sh` (a new provider's key is still added there by hand) |
+| Usage and cost | 🟢 RunRecord + metrics carry `provider` and `local`; local runs cost $0, unknown stays unknown | `sb_obs.track_run` |
+| Streaming | 🟡 A2A streams events between agents; no token streaming to users (needed by MT Chat, SB-1500) | |
+| Provider leakage | 🟡 `AnthropicLlm` in mt-agent, ADK's empty text part handled in the A2A client, Ollama `num_ctx` in a model tag (SB-1520) | |
+| Local-first default | 🔴 no workload runs on Ollama yet; chat stays hosted by measurement (gemma 12B: 11/14, p50 516 s). Batch profile + fallback: SB-1519 | |
 
 ## 3. Framework-independent
 

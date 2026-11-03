@@ -4,6 +4,7 @@ version = "0.1.0"
 description = "Minimal ADK agent that delegates docs questions to docs-agent over A2A"
 requires-python = ">=3.13"
 dependencies = [
+    "sb-models",
     "sb-obs",
     "google-adk[a2a]>=2.13",
     "anthropic>=0.78",
@@ -13,6 +14,7 @@ dependencies = [
 adk-docs-client = "adk_docs_client.cli:main"
 
 [tool.uv.sources]
+sb-models = { workspace = true }
 sb-obs = { workspace = true }
 
 [build-system]

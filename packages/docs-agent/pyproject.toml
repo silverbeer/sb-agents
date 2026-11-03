@@ -4,6 +4,7 @@ version = "0.1.0"
 description = "Specialist agent that answers questions from SB repo docs"
 requires-python = ">=3.13"
 dependencies = [
+    "sb-models",
     "sb-obs",
     "pydantic-ai-slim[anthropic,openai]>=2.64",  # openai: Ollama + OpenRouter providers
     "pydantic-evals>=2.64",
@@ -16,6 +17,7 @@ docs-agent = "docs_agent.cli:main"
 docs-agent-a2a = "docs_agent.a2a_server:main"
 
 [tool.uv.sources]
+sb-models = { workspace = true }
 sb-obs = { workspace = true }
 
 [build-system]

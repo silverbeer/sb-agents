@@ -7,8 +7,8 @@ import os
 from google.adk.agents import LlmAgent
 from google.adk.agents.remote_a2a_agent import RemoteA2aAgent
 from google.adk.models.anthropic_llm import AnthropicLlm
+from sb_models import resolve
 
-DEFAULT_MODEL = "claude-haiku-5-5"
 DEFAULT_DOCS_URL = "http://127.0.0.1:8101"
 CARD_PATH = "/.well-known/agent-card.json"
 
@@ -28,7 +28,7 @@ def build_docs_remote(url: str | None = None) -> RemoteA2aAgent:
 def build_root_agent(docs: RemoteA2aAgent | None = None, model: str | None = None) -> LlmAgent:
     return LlmAgent(
         name="sb_router",
-        model=AnthropicLlm(model=model or os.environ.get("ADK_MODEL", DEFAULT_MODEL)),
+        model=AnthropicLlm(model=resolve("adk-docs-client", model, check_credentials=False).name),
         description="Front door for SB questions.",
         instruction=(
             "You route questions about silverbeer (SB) projects. For any question about how "

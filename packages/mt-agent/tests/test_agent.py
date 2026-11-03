@@ -12,6 +12,7 @@ from mt_fakes import (
     says,
     scripted,
 )
+from sb_models import ModelConfigError
 
 from mt_agent.agent import TOOLS, build_agent, build_toolset, unwrap_mcp_result
 from mt_agent.runner import ToolLedger, TrackedRunner, UsageLimitExceeded, tool_outcome
@@ -122,9 +123,15 @@ def test_toolset_without_token_sends_no_authorization(monkeypatch: pytest.Monkey
 
 
 def test_default_model_is_claude_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("MT_AGENT_MODEL", "claude-sonnet-5")
+    monkeypatch.setenv("MT_AGENT_MODEL", "anthropic:claude-sonnet-5-5")
     agent = build_agent(toolset=build_toolset(MCP_URL, "t"))
-    assert agent.model.model == "claude-sonnet-5"
+    assert agent.model.model == "claude-sonnet-5-5"
+
+
+def test_non_anthropic_model_is_refused_with_the_reason(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("MT_AGENT_MODEL", "openrouter:deepseek/deepseek-v4.1-flash")
+    with pytest.raises(ModelConfigError, match="LiteLLM"):
+        build_agent(toolset=build_toolset(MCP_URL, "t"))
     assert TOOLS == ("search_teams", "list_divisions", "get_upcoming_matches", "get_standings")
 
 

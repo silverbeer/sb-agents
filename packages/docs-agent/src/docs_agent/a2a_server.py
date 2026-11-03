@@ -20,6 +20,7 @@ from fasta2a.pydantic_ai import AgentWorker, worker_lifespan
 from fasta2a.schema import Artifact, Message, Part, Skill, Task, TaskSendParams, TaskState
 from fasta2a.storage import InMemoryStorage
 from pydantic_ai import Agent
+from sb_models import ModelConfigError, resolve
 
 from docs_agent.agent import Deps, DocsAnswer, WithDeps, build_agent
 from docs_agent.corpus import Corpus, KeywordRetriever
@@ -177,5 +178,9 @@ def main() -> None:
     host = os.environ.get("DOCS_AGENT_A2A_HOST", DEFAULT_HOST)
     port = int(os.environ.get("DOCS_AGENT_A2A_PORT", DEFAULT_PORT))
     setup_telemetry("docs-agent")
+    try:
+        resolve("docs-agent")  # fail at startup, not on the first question
+    except ModelConfigError as exc:
+        raise SystemExit(str(exc)) from exc
     # log_config=None: uvicorn's loggers propagate to our JSON root handler.
     uvicorn.run(instrument_asgi(build_app()), host=host, port=port, log_config=None)

@@ -1,0 +1,10 @@
+[project]
+name = "sb-models"
+version = "0.1.0"
+description = "Model registry + resolver for SB agents: which model each agent runs, and what it can do"
+requires-python = ">=3.13"
+dependencies = []
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

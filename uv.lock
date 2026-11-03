@@ -13,6 +13,7 @@ members = [
     "docs-agent",
     "mt-agent",
     "sb-agents",
+    "sb-models",
     "sb-obs",
     "sb-support",
 ]
@@ -48,6 +49,7 @@ source = { editable = "packages/adk-docs-client" }
 dependencies = [
     { name = "anthropic" },
     { name = "google-adk", extra = ["a2a"] },
+    { name = "sb-models" },
     { name = "sb-obs" },
 ]
 
@@ -55,6 +57,7 @@ dependencies = [
 requires-dist = [
     { name = "anthropic", specifier = ">=0.78" },
     { name = "google-adk", extras = ["a2a"], specifier = ">=2.13" },
+    { name = "sb-models", editable = "packages/sb-models" },
     { name = "sb-obs", editable = "packages/sb-obs" },
 ]
 
@@ -587,6 +590,7 @@ dependencies = [
     { name = "fasta2a", extra = ["pydantic-ai"] },
     { name = "pydantic-ai-slim", extra = ["anthropic", "openai"] },
     { name = "pydantic-evals" },
+    { name = "sb-models" },
     { name = "sb-obs" },
     { name = "uvicorn" },
 ]
@@ -596,6 +600,7 @@ requires-dist = [
     { name = "fasta2a", extras = ["pydantic-ai"], specifier = ">=2.1" },
     { name = "pydantic-ai-slim", extras = ["anthropic", "openai"], specifier = ">=2.64" },
     { name = "pydantic-evals", specifier = ">=2.64" },
+    { name = "sb-models", editable = "packages/sb-models" },
     { name = "sb-obs", editable = "packages/sb-obs" },
     { name = "uvicorn", specifier = ">=0.30" },
 ]
@@ -1158,6 +1163,7 @@ source = { editable = "packages/mt-agent" }
 dependencies = [
     { name = "anthropic" },
     { name = "google-adk", extra = ["a2a", "mcp"] },
+    { name = "sb-models" },
     { name = "sb-obs" },
     { name = "uvicorn" },
 ]
@@ -1166,6 +1172,7 @@ dependencies = [
 requires-dist = [
     { name = "anthropic", specifier = ">=0.78" },
     { name = "google-adk", extras = ["a2a", "mcp"], specifier = ">=2.13" },
+    { name = "sb-models", editable = "packages/sb-models" },
     { name = "sb-obs", editable = "packages/sb-obs" },
     { name = "uvicorn", specifier = ">=0.30" },
 ]
@@ -2167,6 +2174,11 @@ dev = [
 ]
 
 [[package]]
+name = "sb-models"
+version = "0.1.0"
+source = { editable = "packages/sb-models" }
+
+[[package]]
 name = "sb-obs"
 version = "0.1.0"
 source = { editable = "packages/sb-obs" }
@@ -2179,6 +2191,7 @@ dependencies = [
     { name = "opentelemetry-instrumentation-logging" },
     { name = "opentelemetry-sdk" },
     { name = "pydantic" },
+    { name = "sb-models" },
 ]
 
 [package.metadata]
@@ -2191,6 +2204,7 @@ requires-dist = [
     { name = "opentelemetry-instrumentation-logging", specifier = ">=0.65b0" },
     { name = "opentelemetry-sdk", specifier = ">=1.44" },
     { name = "pydantic", specifier = ">=2.10" },
+    { name = "sb-models", editable = "packages/sb-models" },
 ]
 
 [[package]]
@@ -2201,6 +2215,7 @@ dependencies = [
     { name = "aiohttp" },
     { name = "httpx" },
     { name = "pydantic-ai-slim", extra = ["anthropic"] },
+    { name = "sb-models" },
     { name = "sb-obs" },
     { name = "slack-bolt" },
 ]
@@ -2210,6 +2225,7 @@ requires-dist = [
     { name = "aiohttp", specifier = ">=3.10" },
     { name = "httpx", specifier = ">=0.27" },
     { name = "pydantic-ai-slim", extras = ["anthropic"], specifier = ">=2.64" },
+    { name = "sb-models", editable = "packages/sb-models" },
     { name = "sb-obs", editable = "packages/sb-obs" },
     { name = "slack-bolt", specifier = ">=1.30" },
 ]

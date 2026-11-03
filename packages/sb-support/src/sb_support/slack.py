@@ -13,6 +13,7 @@ import os
 import re
 from typing import Any
 
+from sb_models import ModelConfigError, resolve
 from slack_bolt.adapter.socket_mode.async_handler import AsyncSocketModeHandler
 from slack_bolt.async_app import AsyncApp
 
@@ -145,8 +146,12 @@ async def _run() -> None:
 
 def main() -> None:
     setup_telemetry("sb-support")
-    required = ("SLACK_BOT_TOKEN", "SLACK_APP_TOKEN", "ANTHROPIC_API_KEY")
+    required = ("SLACK_BOT_TOKEN", "SLACK_APP_TOKEN")
     missing = [k for k in required if not os.environ.get(k)]
     if missing:
         raise SystemExit(f"missing env: {', '.join(missing)}. Run via: {RUN_HINT}")
+    try:
+        resolve("sb-support")  # the model's own credential, whichever provider it is
+    except ModelConfigError as exc:
+        raise SystemExit(f"{exc}. Run via: {RUN_HINT}") from exc
     asyncio.run(_run())

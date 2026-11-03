@@ -16,13 +16,13 @@ from google.adk.agents import LlmAgent
 from google.adk.models.anthropic_llm import AnthropicLlm
 from google.adk.models.base_llm import BaseLlm
 from google.adk.tools.mcp_tool import McpToolset, StreamableHTTPConnectionParams
+from sb_models import resolve
 
 # ADK probes for Google mTLS before every MCP session (google.auth.default(), which
 # off-GCP waits on the metadata server for seconds). Measured in MT, SB-1302.
 os.environ.setdefault("GOOGLE_API_USE_CLIENT_CERTIFICATE", "false")
 
 NAME = "mt_agent"  # ADK agent names must be identifiers; the A2A card says "mt-agent"
-DEFAULT_MODEL = "claude-haiku-5-5"
 DEFAULT_MCP_URL = "https://api.missingtable.com/mcp/"
 CLIENT_HEADER = "sb-agents"  # X-MT-Client: can only narrow the tiers mt-mcp lists
 TOOLS = ("search_teams", "list_divisions", "get_upcoming_matches", "get_standings")
@@ -114,7 +114,8 @@ def _after_tool(tool: Any, args: dict[str, Any], tool_context: Any, tool_respons
 
 def build_agent(model: BaseLlm | str | None = None, toolset: McpToolset | None = None) -> LlmAgent:
     if model is None or isinstance(model, str):
-        model = AnthropicLlm(model=model or os.environ.get("MT_AGENT_MODEL", DEFAULT_MODEL))
+        # Registry default or $MT_AGENT_MODEL; the registry limits mt-agent to Anthropic.
+        model = AnthropicLlm(model=resolve("mt-agent", model, check_credentials=False).name)
     return LlmAgent(
         name=NAME,
         model=model,
