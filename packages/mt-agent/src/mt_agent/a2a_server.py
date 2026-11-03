@@ -17,6 +17,7 @@ from a2a.types import AgentCapabilities, AgentCard, AgentInterface, AgentSkill
 from google.adk.a2a.utils.agent_to_a2a import to_a2a
 from google.adk.agents import LlmAgent
 from google.adk.tools.base_toolset import BaseToolset
+from sb_models import ModelConfigError, resolve
 from starlette.applications import Starlette
 
 from mt_agent.agent import build_agent
@@ -93,6 +94,10 @@ def main() -> None:
     host = os.environ.get("MT_AGENT_HOST", DEFAULT_HOST)
     port = int(os.environ.get("MT_AGENT_PORT", DEFAULT_PORT))
     setup_telemetry("mt-agent")
+    try:
+        resolve("mt-agent")  # fail at startup, not on the first question
+    except ModelConfigError as exc:
+        raise SystemExit(str(exc)) from exc
     if not os.environ.get("MT_AGENT_MCP_TOKEN"):
         log.warning("MT_AGENT_MCP_TOKEN is not set: mt-mcp will refuse every tool call")
     # log_config=None: uvicorn's loggers propagate to our JSON root handler.

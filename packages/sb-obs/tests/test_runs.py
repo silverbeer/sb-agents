@@ -122,3 +122,25 @@ def test_eval_cost_unknown_when_nothing_priced() -> None:
 
     rec = EvalRecord(suite="s", model="m", judge_model="j", cases=1, passed=1, pass_rate=1.0)
     assert rec.cost_usd is None
+
+
+def test_record_carries_provider_and_local(emitted: list) -> None:  # type: ignore[type-arg]
+    with track_run("docs-agent", caller="cli", model="openrouter:deepseek/deepseek-v4.1-flash"):
+        pass
+    with track_run("docs-agent", caller="cli", model="ollama:gemma4:12b-16k"):
+        pass
+    remote, local = emitted[-2:]
+    assert (remote.model, remote.provider, remote.local) == (
+        "deepseek/deepseek-v4.1-flash",
+        "openrouter",
+        False,
+    )
+    assert remote.cost_usd is None  # no usage recorded: unknown, not free
+    assert (local.provider, local.local, local.cost_usd) == ("ollama", True, 0.0)
+
+
+def test_price_uses_registry_provider_and_local_is_free() -> None:
+    assert price("ollama:gemma4:12b-16k", input_tokens=1000, output_tokens=1000) == 0.0
+    by_ref = price("anthropic:claude-haiku-5-5", input_tokens=1000, output_tokens=1000)
+    by_name = price("claude-haiku-5-5", input_tokens=1000, output_tokens=1000)
+    assert by_ref == by_name and by_ref

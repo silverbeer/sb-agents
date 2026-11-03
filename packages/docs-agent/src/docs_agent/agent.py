@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
@@ -15,11 +14,10 @@ from pydantic_ai.agent import WrapperAgent
 from pydantic_ai.messages import ModelMessage, ToolCallPart
 from pydantic_ai.models import Model
 from pydantic_ai.usage import UsageLimits
+from sb_models import resolve
 
 from docs_agent.corpus import Corpus, Retriever
-from sb_obs import model_name, track_run
-
-DEFAULT_MODEL = "anthropic:claude-haiku-5-5"
+from sb_obs import track_run
 
 # Per-run caps. Measured (SB-1478): a question takes 3-4 requests, ~2-4 tool calls,
 # ~15k tokens and ~$0.002 on Haiku, so these leave ~2-4x headroom and stop a loop.
@@ -85,7 +83,8 @@ def searched(messages: list[ModelMessage]) -> bool:
 
 def build_agent(model: Model | str | None = None) -> Agent[Deps, DocsAnswer]:
     agent = Agent(
-        model or os.environ.get("DOCS_AGENT_MODEL", DEFAULT_MODEL),
+        # Registry default or $DOCS_AGENT_MODEL, checked against what this agent needs.
+        model or resolve("docs-agent", check_credentials=False).ref,
         deps_type=Deps,
         output_type=DocsAnswer,
         instructions=INSTRUCTIONS,
@@ -155,7 +154,7 @@ class WithDeps(WrapperAgent[Deps, DocsAnswer]):
             kwargs["deps"] = self._deps
         if kwargs.get("usage_limits") is None:
             kwargs["usage_limits"] = USAGE_LIMITS
-        model = model_name(kwargs.get("model") or self.wrapped.model)
+        model = kwargs.get("model") or self.wrapped.model
         with track_run("docs-agent", caller=self._caller, model=model) as handle:
             async with self.wrapped.iter(user_prompt, **kwargs) as run:
                 try:

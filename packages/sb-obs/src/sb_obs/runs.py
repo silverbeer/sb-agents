@@ -24,6 +24,7 @@ from typing import Any, Literal
 
 from opentelemetry import metrics, trace
 from pydantic import BaseModel, Field
+from sb_models import describe
 
 log = logging.getLogger("sb_obs.runs")
 _tracer = trace.get_tracer("sb_obs")
@@ -38,7 +39,9 @@ class RunRecord(BaseModel):
     trace_id: str | None = None
     agent: str
     caller: str  # slack | a2a | cli | eval
-    model: str
+    model: str  # name without provider, e.g. claude-haiku-5-5 (stable metric label)
+    provider: str | None = None  # anthropic | openrouter | ollama; None = unknown
+    local: bool | None = None  # ran on a local model (cost is then 0, not unknown)
     outcome: Outcome
     requests: int = 0
     tool_calls: int = 0
@@ -106,13 +109,16 @@ class RunHandle:
 
 
 @contextmanager
-def track_run(agent: str, *, caller: str, model: str) -> Iterator[RunHandle]:
+def track_run(agent: str, *, caller: str, model: Any) -> Iterator[RunHandle]:
     """Wrap one agent run: span, timing, outcome, and the emitted RunRecord.
 
+    `model` is a ref (`openrouter:deepseek/...`), a bare name, or a framework model
+    object; provider and local/hosted come from the model registry (sb_models).
     A `UsageLimitExceeded` (PydanticAI, matched by name) is outcome "limit";
     any other exception is "error". Exceptions are always re-raised.
     """
-    handle = RunHandle(agent, caller, model)
+    info = describe(model)
+    handle = RunHandle(agent, caller, info.name)
     outcome: Outcome = "ok"
     error: str | None = None
     start = time.perf_counter()
@@ -125,18 +131,23 @@ def track_run(agent: str, *, caller: str, model: str) -> Iterator[RunHandle]:
             raise
         finally:
             ctx = span.get_span_context()
+            usage = dict(handle.usage)
+            if info.local and usage.get("cost_usd") is None:
+                usage["cost_usd"] = 0.0  # local inference: free, not unknown
             record = RunRecord(
                 trace_id=format(ctx.trace_id, "032x") if ctx.is_valid else None,
                 agent=agent,
                 caller=caller,
-                model=model,
+                model=info.name,
+                provider=info.provider,
+                local=info.local,
                 outcome=outcome,
                 latency_ms=int((time.perf_counter() - start) * 1000),
                 confidence=handle.confidence,
                 routed_to=",".join(handle.routed_to) or None,
                 escalated=handle.escalated,
                 error=error,
-                **handle.usage,
+                **usage,
             )
             span.set_attributes(
                 {f"sb.run.{k}": v for k, v in record.model_dump().items() if v is not None}
@@ -150,7 +161,12 @@ def emit(record: RunRecord) -> None:
     log.log(level, "agent run", extra={"event": "agent_run", **record.model_dump()})
 
     meter = metrics.get_meter("sb_obs")
-    attrs = {"agent": record.agent, "model": record.model, "caller": record.caller}
+    attrs = {
+        "agent": record.agent,
+        "model": record.model,
+        "provider": record.provider or "unknown",
+        "caller": record.caller,
+    }
     meter.create_counter("sb_agent_runs", description="Agent runs").add(
         1, {**attrs, "outcome": record.outcome}
     )
@@ -165,10 +181,8 @@ def emit(record: RunRecord) -> None:
 
 
 def model_name(model: Any) -> str:
-    """'anthropic:claude-haiku-5-5' or a Model object → a stable model label."""
-    if isinstance(model, str):
-        return model.split(":", 1)[-1]
-    return getattr(model, "model_name", None) or type(model).__name__
+    """'anthropic:claude-haiku-5-5' or a Model object → a stable model label (no provider)."""
+    return describe(model).name
 
 
 def price(
@@ -178,13 +192,19 @@ def price(
     output_tokens: int,
     cache_read_tokens: int = 0,
     cache_write_tokens: int = 0,
-    provider: str = "anthropic",
+    provider: str | None = None,
 ) -> float | None:
     """USD for one request via genai-prices; None if the model isn't priced.
 
     For frameworks that don't compute cost themselves (ADK). `input_tokens` here is
-    the total prompt, including cached tokens, as genai-prices expects.
+    the total prompt, including cached tokens, as genai-prices expects. The provider
+    comes from the model registry unless given; local models cost 0.
     """
+    info = describe(model)
+    if info.local:
+        return 0.0
+    provider = provider or info.provider or "anthropic"
+    model = info.name
     try:
         from genai_prices import Usage, calc_price
 

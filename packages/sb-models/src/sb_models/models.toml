@@ -1,0 +1,102 @@
+# The models SB agents may run on, and which one each agent uses.
+#
+# Changing an agent's model is config: set its env var (e.g. DOCS_AGENT_MODEL) to a model
+# below, or change `model` here. Adding a model is an entry here *and* an eval
+# (docs/notes/model-comparison.md); `eval` records the latest result.
+#
+# Metadata is checked at startup against what the agent needs: a model without tool
+# calling, or with too small a context, fails loudly instead of degrading silently.
+#
+# Sources (2026-11-03): Claude limits from the claude-api reference (models.md);
+# OpenRouter limits from https://openrouter.ai/api/v1/models; Ollama from `ollama show`
+# (context_window is the num_ctx actually used, not the model's maximum).
+
+# --- providers --------------------------------------------------------------------
+# `credential`: env var the provider needs. For Ollama it's the server URL, not a secret.
+
+[providers.anthropic]
+credential = "ANTHROPIC_API_KEY"
+
+[providers.openrouter]
+credential = "OPENROUTER_API_KEY"
+
+[providers.ollama]
+credential = "OLLAMA_BASE_URL"
+local = true
+
+# --- agents -----------------------------------------------------------------------
+# `providers` limits which providers an agent's framework can drive.
+
+[agents.docs-agent]
+model = "anthropic:claude-haiku-5-5"
+env = "DOCS_AGENT_MODEL"
+needs = { tools = true, structured_output = true, min_context = 16384 }
+
+[agents.docs-agent-judge]
+model = "anthropic:claude-sonnet-5-5"
+env = "DOCS_AGENT_JUDGE_MODEL"
+needs = { structured_output = true }
+
+[agents.sb-support]
+model = "anthropic:claude-haiku-5-5"
+env = "SB_SUPPORT_MODEL"
+needs = { tools = true }
+
+[agents.mt-agent]
+model = "anthropic:claude-haiku-5-5"
+env = "MT_AGENT_MODEL"
+needs = { tools = true }
+# ADK reaches other providers only via LiteLLM, whose allowed range conflicts with
+# PydanticAI's openai pin (SB-1490). Lift when ADK does.
+providers = ["anthropic"]
+providers_reason = "ADK agents are Claude-only until ADK lifts its LiteLLM cap (SB-1490)"
+
+[agents.adk-docs-client]
+model = "anthropic:claude-haiku-5-5"
+env = "ADK_MODEL"
+needs = { tools = true }
+providers = ["anthropic"]
+providers_reason = "ADK agents are Claude-only until ADK lifts its LiteLLM cap (SB-1490)"
+
+# --- models -----------------------------------------------------------------------
+
+[models."anthropic:claude-haiku-5-5"]
+context_window = 1_000_000
+tools = true
+structured_output = true
+eval = { suite = "docs-agent", passed = 14, cases = 14, date = "2026-11-01" }
+
+[models."anthropic:claude-sonnet-5-5"]
+context_window = 1_000_000
+tools = true
+structured_output = true
+
+[models."openrouter:deepseek/deepseek-v4.1-flash"]
+context_window = 1_048_576
+tools = true
+structured_output = true
+eval = { suite = "docs-agent", passed = 13, cases = 14, date = "2026-11-01" }
+
+[models."openrouter:z-ai/glm-5.3-flash"]
+context_window = 1_048_576
+tools = true
+structured_output = true
+eval = { suite = "docs-agent", passed = 14, cases = 14, date = "2026-11-01" }
+
+[models."openrouter:nvidia/nemotron-3.5-super-vl:free"]
+context_window = 1_000_000
+tools = true
+structured_output = true
+eval = { suite = "docs-agent", passed = 13, cases = 14, date = "2026-11-01" }
+
+[models."ollama:gemma4:12b-16k"]
+context_window = 16_384  # num_ctx 16384 (ollama create gemma4:12b-16k)
+tools = true
+structured_output = true
+eval = { suite = "docs-agent", passed = 11, cases = 14, date = "2026-11-01" }
+
+[models."ollama:gemma4:12b"]
+context_window = 4_096  # Ollama's default num_ctx; truncates silently (31% on docs-agent)
+tools = true
+structured_output = true
+eval = { suite = "docs-agent", passed = 4, cases = 13, date = "2026-11-01" }

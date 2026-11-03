@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-import os
 from dataclasses import dataclass, field
 from decimal import Decimal
 
@@ -11,12 +10,12 @@ from opentelemetry import trace
 from pydantic_ai import Agent, RunContext, Tool
 from pydantic_ai.models import Model
 from pydantic_ai.usage import UsageLimits
+from sb_models import resolve
 
 from sb_support.specialists import Specialist, SpecialistError
 
 log = logging.getLogger("sb_support.routing")
 
-DEFAULT_MODEL = "anthropic:claude-haiku-5-5"
 
 # Decide, ask one or two specialists, relay (+1 retry). Specialists' own spend is capped and
 # recorded by them; these caps cover sb-support's model only.
@@ -100,7 +99,7 @@ def build_agent(
 ) -> Agent[SupportDeps, str]:
     """Build the support agent. `model` overrides SB_SUPPORT_MODEL / the default."""
     return Agent(
-        model or os.environ.get("SB_SUPPORT_MODEL", DEFAULT_MODEL),
+        model or resolve("sb-support", check_credentials=False).ref,
         deps_type=SupportDeps,
         instructions=INSTRUCTIONS,
         name="sb-support",

@@ -20,7 +20,7 @@ from pydantic_ai import Agent
 from pydantic_ai.exceptions import UsageLimitExceeded
 from pydantic_ai.messages import ModelMessage
 
-from sb_obs import model_name, track_run
+from sb_obs import track_run
 from sb_support.agent import USAGE_LIMITS, SupportDeps
 
 log = logging.getLogger("sb_support")
@@ -99,7 +99,7 @@ async def answer(
     """
     deps = SupportDeps()
     history = memory.history(key) if memory is not None and key else []
-    with track_run("sb-support", caller=caller, model=model_name(agent.model)) as run:
+    with track_run("sb-support", caller=caller, model=agent.model) as run:
         try:
             result = await agent.run(
                 question, deps=deps, message_history=history or None, usage_limits=USAGE_LIMITS
