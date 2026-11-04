@@ -34,6 +34,11 @@ log = logging.getLogger("sb_support.specialists")
 DEFAULT_URLS = "http://127.0.0.1:8101,http://127.0.0.1:8102"  # docs-agent, mt-agent
 CARD_PATH = "/.well-known/agent-card.json"
 A2A_VERSION = "1.0"
+# A specialist that declares this in its card's `capabilities.extensions` keeps one
+# conversation per contextId (SB-1525); it gets a stable contextId per conversation.
+# Others get none: fasta2a (docs-agent) would replay the whole history, tool results
+# included, for a reused context. Same URI as mt_agent.a2a_server.
+CONVERSATION_EXTENSION = "urn:sb-agents:a2a:conversation:v1"
 FAILED_STATES = ("TASK_STATE_FAILED", "TASK_STATE_REJECTED", "TASK_STATE_CANCELED")
 
 
@@ -60,20 +65,22 @@ class SpecialistClient:
     http_client: httpx.AsyncClient | None = None
     timeout_s: float = 90.0
 
-    async def ask(self, question: str) -> SpecialistAnswer:
+    async def ask(self, question: str, context_id: str | None = None) -> SpecialistAnswer:
+        """`context_id`: reuse for follow-ups in one conversation; None = a new context."""
         url = self.url.rstrip("/")
         http = self.http_client or traced_http_client(timeout=self.timeout_s)
+        message: dict[str, Any] = {
+            "messageId": uuid.uuid4().hex,
+            "role": "ROLE_USER",
+            "parts": [{"text": question}],
+        }
+        if context_id:
+            message["contextId"] = context_id
         request = {
             "jsonrpc": "2.0",
             "id": uuid.uuid4().hex,
             "method": "SendStreamingMessage",
-            "params": {
-                "message": {
-                    "messageId": uuid.uuid4().hex,
-                    "role": "ROLE_USER",
-                    "parts": [{"text": question}],
-                }
-            },
+            "params": {"message": message},
         }
         headers = {"A2A-Version": A2A_VERSION, "Accept": "text/event-stream"}
         answer = _Answer()
@@ -145,6 +152,13 @@ class Specialist:
     description: str
     client: SpecialistClient
     examples: list[str] = field(default_factory=list)
+    conversational: bool = False  # declares CONVERSATION_EXTENSION
+
+    def context_id(self, conversation_key: str | None) -> str | None:
+        """Stable per (conversation, specialist), opaque: no channel or thread ids leak."""
+        if not self.conversational or not conversation_key:
+            return None
+        return uuid.uuid5(uuid.NAMESPACE_URL, f"sb-support/{conversation_key}/{self.name}").hex
 
     @property
     def tool_name(self) -> str:
@@ -163,11 +177,13 @@ def specialist_from_card(
 ) -> Specialist:
     skills = card.get("skills") or []
     examples = [e for s in skills for e in (s.get("examples") or [])]
+    extensions = (card.get("capabilities") or {}).get("extensions") or []
     return Specialist(
         name=card["name"],
         description=card.get("description", ""),
         client=SpecialistClient(url, http),
         examples=examples,
+        conversational=any(e.get("uri") == CONVERSATION_EXTENSION for e in extensions),
     )
 
 

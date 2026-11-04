@@ -98,12 +98,12 @@ async def test_every_premise_is_checked_before_reporting() -> None:
 
 
 def report_for(answer: E.Answer, meta: E.Meta, expected: str = "x"):
-    case = Case(name="c", inputs="q?", expected_output=expected, metadata=meta)
+    case = Case(name="c", inputs=["q?"], expected_output=expected, metadata=meta)
     dataset = E.build_dataset(
         [case], judge=TestModel(custom_output_args={"reason": "ok", "pass": True, "score": 1.0})
     )
 
-    async def task(question: str) -> E.Answer:
+    async def task(turns: list[str]) -> E.Answer:
         return answer
 
     return dataset.evaluate(task, progress=False)
@@ -165,7 +165,7 @@ async def test_ask_returns_text_confidence_tools_and_cost() -> None:
     async with stub.running():
         toolset = build_toolset(MCP_URL, "t", httpx_client_factory=stub.client_factory())
         runner = TrackedRunner(build_agent(model, toolset), caller="eval")
-        answer = await E.ask(runner, "Where are IFA U14?")
+        answer = await E.ask(runner, ["Where are IFA U14?"])
         await toolset.close()
     assert answer.text == "IFA is 1st (18 played of 42 scheduled)."
     assert answer.confidence == "high"

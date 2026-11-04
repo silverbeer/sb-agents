@@ -13,7 +13,7 @@ import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
-from a2a.types import AgentCapabilities, AgentCard, AgentInterface, AgentSkill
+from a2a.types import AgentCapabilities, AgentCard, AgentExtension, AgentInterface, AgentSkill
 from google.adk.a2a.utils.agent_to_a2a import to_a2a
 from google.adk.agents import LlmAgent
 from google.adk.tools.base_toolset import BaseToolset
@@ -41,6 +41,12 @@ EXAMPLES = [
 ]
 
 
+# Declares "reuse contextId for follow-ups" (SB-1525). Callers send a stable contextId
+# only to specialists that declare it: fasta2a (docs-agent) replays the whole history,
+# tool results included, for a reused context. Same URI as sb_support.specialists.
+CONVERSATION_EXTENSION = "urn:sb-agents:a2a:conversation:v1"
+
+
 def build_card(url: str) -> AgentCard:
     return AgentCard(
         name="mt-agent",
@@ -49,7 +55,18 @@ def build_card(url: str) -> AgentCard:
         supported_interfaces=[
             AgentInterface(url=url, protocol_binding="JSONRPC", protocol_version="1.0")
         ],
-        capabilities=AgentCapabilities(streaming=True),
+        capabilities=AgentCapabilities(
+            streaming=True,
+            extensions=[
+                AgentExtension(
+                    uri=CONVERSATION_EXTENSION,
+                    description=(
+                        "Send the same contextId for follow-up messages: each context is "
+                        "one conversation (an ADK session, kept 30 minutes idle)."
+                    ),
+                )
+            ],
+        ),
         default_input_modes=["text/plain"],
         default_output_modes=["text/plain", "application/json"],
         skills=[

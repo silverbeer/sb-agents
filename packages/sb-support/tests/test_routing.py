@@ -21,9 +21,11 @@ class StubClient:
     confidence: str | None = "high"
     fail: bool = False
     asked: list[str] | None = None
+    contexts: list[str | None] | None = None
 
-    async def ask(self, question: str) -> SpecialistAnswer:
+    async def ask(self, question: str, context_id: str | None = None) -> SpecialistAnswer:
         (self.asked if self.asked is not None else []).append(question)
+        (self.contexts if self.contexts is not None else []).append(context_id)
         if self.fail:
             raise SpecialistError("unreachable at http://x")
         return SpecialistAnswer(f"answer\n\n_confidence: {self.confidence}_", self.confidence)
@@ -205,3 +207,60 @@ def test_answer_keeps_the_first_artifact_with_text() -> None:
     answer.read({"result": {"artifactUpdate": {"artifact": {"parts": [{"text": "first"}]}}}})
     answer.read({"result": {"task": {"artifacts": [{"parts": [{"text": "again"}]}], "status": {}}}})
     assert answer.text == "first"
+
+
+# --- conversation contexts (SB-1525) ---------------------------------------------------
+
+
+def test_context_id_is_stable_opaque_and_only_for_conversational_specialists() -> None:
+    mt = Specialist("mt-agent", "MT data.", StubClient(), conversational=True)
+    plain = Specialist("docs-agent", "Docs.", StubClient())
+    key = "slack:C123:1712.5"
+    assert mt.context_id(key) == mt.context_id(key)
+    assert mt.context_id(key) != mt.context_id("slack:C123:9999.1")
+    assert "C123" not in mt.context_id(key)
+    assert plain.context_id(key) is None
+    assert mt.context_id(None) is None
+
+
+async def test_follow_ups_reuse_the_specialists_context(emitted: list) -> None:
+    client = StubClient(asked=[], contexts=[])
+    mt = Specialist("mt-agent", "MT data.", client, conversational=True)
+    from sb_support.core import InboundMessage
+
+    # A fresh core per message (TestModel won't re-call a tool it sees in history): the
+    # contextId comes from the conversation key alone, so it also survives a restart.
+    for conversation, text in [("t1", "IFA U15 standings?"), ("t1", "and U14?"), ("t2", "hi")]:
+        core = SupportCore(build_agent(TestModel(call_tools=["ask_mt_agent"]), [mt]))
+        await core.handle(InboundMessage("slack", conversation, text))
+    first, second, other = client.contexts
+    assert first and first == second
+    assert other and other != first
+
+
+async def test_specialist_client_sends_context_id_only_when_given() -> None:
+    from sb_support.specialists import SpecialistClient
+
+    sent: list[dict] = []
+
+    def reply(request: httpx.Request) -> httpx.Response:
+        import json as _json
+
+        sent.append(_json.loads(request.content)["params"]["message"])
+        body = {"result": {"message": {"parts": [{"text": "ok"}]}}}
+        return httpx.Response(200, json=body)
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(reply)) as http:
+        await SpecialistClient(BASE, http).ask("q", context_id="ctx-1")
+        await SpecialistClient(BASE, http).ask("q")
+    assert sent[0]["contextId"] == "ctx-1"
+    assert "contextId" not in sent[1]
+
+
+def test_card_extension_marks_a_specialist_conversational() -> None:
+    from sb_support.specialists import CONVERSATION_EXTENSION, specialist_from_card
+
+    ext = {"capabilities": {"extensions": [{"uri": CONVERSATION_EXTENSION}]}}
+    assert specialist_from_card({"name": "a", **ext}, BASE, None).conversational
+    assert not specialist_from_card({"name": "b", "capabilities": {}}, BASE, None).conversational
+    assert not specialist_from_card({"name": "c"}, BASE, None).conversational

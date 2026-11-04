@@ -50,6 +50,7 @@ class SupportDeps:
     """Per-run record of which specialists were asked and how sure they were."""
 
     calls: list[SpecialistCall] = field(default_factory=list)
+    conversation_key: str | None = None  # "slack:<thread>": scopes specialist contexts
 
     @property
     def routed_to(self) -> list[str]:
@@ -77,7 +78,8 @@ def specialist_tool(specialist: Specialist) -> Tool[SupportDeps]:
         log.info("routed", extra={"specialist": specialist.name, "question": question[:200]})
         trace.get_current_span().set_attribute("sb.routed_to", specialist.name)
         try:
-            answer = await specialist.client.ask(question)
+            context_id = specialist.context_id(ctx.deps.conversation_key)
+            answer = await specialist.client.ask(question, context_id=context_id)
         except SpecialistError as exc:
             # Returned, not raised: the model can still reply ("docs are unavailable"), and
             # the failed call triggers escalation. A retry would just fail again.
