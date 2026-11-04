@@ -28,9 +28,9 @@ local = true
 # `providers` limits which providers an agent's framework can drive.
 
 [agents.docs-agent]
-# DeepSeek since SB-1490: 14/14 twice at 100k token cap, ~1/8 Haiku's cost, faster.
-# Fallback by env: DOCS_AGENT_MODEL=openrouter:z-ai/glm-5.3-flash (14/14 x3) or Haiku.
-model = "openrouter:deepseek/deepseek-v4.1-flash"
+# Haiku. DeepSeek passes the eval (14/14 x2 at 100k tokens) but used ~2x Haiku's tool
+# calls on live questions and hit the 12-call cap (SB-1490, docs/notes/model-comparison.md).
+model = "anthropic:claude-haiku-5-5"
 env = "DOCS_AGENT_MODEL"
 needs = { tools = true, structured_output = true, min_context = 16384 }
 

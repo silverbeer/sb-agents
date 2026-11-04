@@ -117,13 +117,29 @@ $0.029 / $0.092, openai/gpt-6-luna $0.10 / $0.50, qwen/qwen3.8-flash $0.15 / $0.
 Haiku 5.5 is $0.10 / $0.50 direct, so the cheap paid tier is about the same price; only
 GLM flash is clearly cheaper. The reason to run them is quality per dollar, not price.
 
+### Live check after deploy (2026-11-04): reverted
+
+DeepSeek went live as docs-agent's default and was rolled back within minutes. Two real
+questions, outside the eval set, against the same corpus:
+
+| Question | Haiku | DeepSeek |
+|---|---|---|
+| How do I deploy sb-agents to k3s? | 4 requests, 19k in tokens | 7 requests, 37k in tokens (in k3s: 12 tool calls, cap hit) |
+| How does mt-agent authenticate to MissingTable? | 5 requests, 28k in tokens | **failed:** 15 tool calls > 12 cap |
+
+DeepSeek searches wide (several parallel `search_docs` / `read_doc` calls per turn).
+The eval's cases are narrow enough that it stays under the caps, so 14/14 hid this.
+**The eval measures answer quality, not tool-call budget on open questions.** Before a
+model replaces Haiku again: add open-ended cases (e.g. these two) to the eval and record
+tool calls per case (p50/p95) next to the pass rate. Raising `tool_calls_limit` to fit
+one model would hide the same signal.
+
 ## Recommendation per role (2026-11-04)
 
-- **Specialist (docs-agent): DeepSeek-v4.1-flash is the default** (`models.toml`).
-  14/14 on both runs at the 100k cap, ~$0.0002 per question (about 1/8 of Haiku), fastest
-  p50. Fallbacks by env, no code change: `DOCS_AGENT_MODEL=openrouter:z-ai/glm-5.3-flash`
-  (14/14 on all three runs, about Haiku's price) or `anthropic:claude-haiku-5-5`.
-  Caveat: one provider account now sits on the hot path; automatic fallback is SB-1519.
+- **Specialist (docs-agent): keep Haiku.** DeepSeek-v4.1-flash passes the eval (14/14 x2
+  at 100k tokens) at ~1/8 the cost but overruns the tool-call cap on open questions.
+  GLM-5.3-flash (14/14 x3, about Haiku's price) hasn't had the live check yet. Either is
+  one env var away: `DOCS_AGENT_MODEL=openrouter:<id>`; the k3s Secret already has the key.
 - **Router (sb-support):** keep Haiku. It drives the Slack conversation and escalation,
   and has no eval of its own yet; switch only after one exists.
 - **Router (ADK / mt-agent):** keep Haiku; the ADK side can't switch (LiteLLM conflict).
