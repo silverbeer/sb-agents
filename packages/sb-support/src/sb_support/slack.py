@@ -85,6 +85,28 @@ def escalation_text(reason: str) -> str:
 # Slack answered `null` with "invalid_blocks: must provide an object" (SB-1533).
 TABLE_MAX_ROWS, TABLE_MAX_COLS, TABLE_MAX_CHARS, SECTION_MAX = 100, 20, 10_000, 3_000
 _NUMERIC = re.compile(r"^[+-]?\d+$")
+_BOLD = re.compile(r"\*\*(.+?)\*\*")  # specialists write CommonMark bold
+
+
+def mrkdwn(text: str) -> str:
+    """CommonMark **bold** → Slack's *bold*."""
+    return _BOLD.sub(r"*\1*", text)
+
+
+def _bold_cell(text: str) -> dict[str, Any]:
+    return {
+        "type": "rich_text",
+        "elements": [
+            {
+                "type": "rich_text_section",
+                "elements": [{"type": "text", "text": text, "style": {"bold": True}}],
+            }
+        ],
+    }
+
+
+def _cell(text: str, bold: bool) -> dict[str, Any]:
+    return _bold_cell(text or " ") if bold else {"type": "raw_text", "text": text or " "}
 
 
 def table_block(table: Table) -> dict[str, Any] | None:
@@ -100,7 +122,7 @@ def table_block(table: Table) -> dict[str, Any] | None:
     return {
         "type": "table",
         "column_settings": [{"align": "right" if n else "left"} for n in numeric],
-        "rows": [[{"type": "raw_text", "text": c or " "} for c in r] for r in rows],
+        "rows": [[_cell(c, i - 1 in table.highlight) for c in r] for i, r in enumerate(rows)],
     }
 
 
@@ -110,7 +132,7 @@ def table_as_code(table: Table) -> str:
     widths = [max(len(r[i]) for r in rows) for i in range(len(table.columns))]
     lines = ["  ".join(c.ljust(w) for c, w in zip(r, widths, strict=True)).rstrip() for r in rows]
     title = f"*{table.title}*\n" if table.title else ""
-    notes = "".join(f"\n{n}" for n in table.notes)
+    notes = "".join(f"\n{mrkdwn(n)}" for n in table.notes)
     return f"{title}```\n" + "\n".join(lines) + "\n```" + notes
 
 
@@ -129,7 +151,7 @@ def blocks_for(reply: Reply, text: str) -> list[dict[str, Any]] | None:
         )
     out.append(block)
     if table.notes:
-        notes = "\n".join(f"• {n}" for n in table.notes)
+        notes = "\n".join(f"• {mrkdwn(n)}" for n in table.notes)
         out.append({"type": "context", "elements": [{"type": "mrkdwn", "text": notes}]})
     return out
 

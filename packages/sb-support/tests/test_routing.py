@@ -284,10 +284,23 @@ def test_parse_tables_keeps_well_formed_ones_and_cleans_floats() -> None:
     assert table.rows == [["1", "22"], ["2", "18"]]
     assert table.notes == []
     [noted] = parse_tables({"tables": [{**data["tables"][0], "notes": ["Hot run.", "", 3.0]}]})
-    assert noted.notes == ["Hot run.", "3.0"]
+    assert noted.notes == ["Hot run.", "3"]
     [bad] = parse_tables({"tables": [{**data["tables"][0], "notes": "not a list"}]})
     assert bad.notes == []
+    # Floats from protobuf become ints; out-of-range, bools and junk are dropped.
+    [lit] = parse_tables({"tables": [{**data["tables"][0], "highlight": [1.0, 5, True, "0", -1]}]})
+    assert lit.highlight == [1]
     assert parse_tables(None) == [] and parse_tables({"tables": "x"}) == []
+
+
+def test_the_model_is_told_what_is_shown_under_its_reply() -> None:
+    from sb_support.agent import shown_note
+    from sb_support.tables import Table
+
+    assert shown_note([]) == ""
+    note = shown_note([Table("U15 Flex New England", ["#"], [["1"], ["2"]], ["a", "b"])])
+    assert '"U15 Flex New England" with all 2 rows and 2 trend notes' in note
+    assert "don't say they are missing" in note
 
 
 async def test_reply_carries_the_specialists_tables(emitted: list) -> None:

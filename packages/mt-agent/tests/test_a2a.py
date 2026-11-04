@@ -225,6 +225,6 @@ async def test_standings_table_survives_the_a2a_data_part() -> None:
         answer = await SpecialistClient(BASE, http).ask("IFA U14 standings?")
 
     [table] = parse_tables(answer.data)
-    assert table.title.startswith("Homegrown Northeast U14 (League)")
-    assert table.rows == [["1", "IFA", "6", "5", "0", "1", "+9", "15", "WWWLW", "▲2"]]
-    assert table.notes == ["Biggest climb since the last match day: IFA, up 2."]
+    assert table.title == "U14 Homegrown Northeast · 18 of 42 matches played"
+    assert table.rows == [["1 ▲2", "IFA", "6", "5", "0", "1", "+9", "15", "🟩🟩🟩🟥🟩"]]
+    assert table.notes == ["Biggest climb since the last match day: **IFA**, up 2."]

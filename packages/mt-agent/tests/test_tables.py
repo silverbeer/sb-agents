@@ -62,10 +62,35 @@ UPCOMING = {
 
 def test_standings_rows_are_strings_with_title_and_coverage() -> None:
     table = standings_table(STANDINGS)
-    assert table["title"] == "Homegrown Northeast U15 (League): 51 played of 190 scheduled"
-    assert table["columns"] == ["#", "Team", "P", "W", "D", "L", "GD", "Pts", "Last 5", "±"]
-    assert table["rows"] == [["1", "Metropolitan Oval", "9", "7", "1", "1", "+20", "22", "", ""]]
-    assert table["notes"] == []
+    assert table["title"] == "U15 Homegrown Northeast · 51 played of 190 scheduled"
+    assert table["columns"] == ["#", "Team", "P", "W", "D", "L", "GD", "Pts", "Form →"]
+    assert table["rows"] == [["1", "Metropolitan Oval", "9", "7", "1", "1", "+20", "22", ""]]
+    assert table["notes"] == [] and table["highlight"] == []
+
+
+def test_title_uses_structured_coverage_and_names_the_competition_once() -> None:
+    from mt_agent.tables import standings_title
+
+    coverage = {"matches_counted": 11, "fixtures": 21}
+    flex = {
+        "competition": "Flex",
+        "age_group": {"name": "U15"},
+        "division": {"name": "New England", "league": "Flex"},
+        "coverage": coverage,
+    }
+    assert standings_title(flex) == "U15 Flex New England · 11 of 21 matches played"
+    qualifying = {**STANDINGS, "competition": "qualifying", "coverage": coverage}
+    assert standings_title(qualifying) == (
+        "U15 Homegrown Northeast · qualifying record · 11 of 21 matches played"
+    )
+
+
+def test_the_requested_team_is_highlighted() -> None:
+    rows = [
+        ROW,
+        {**ROW, "position": 2, "team": {"id": 9, "name": "IFA"}, "is_requested_team": True},
+    ]
+    assert standings_table({**STANDINGS, "rows": rows})["highlight"] == [1]
 
 
 def _row(position: int, name: str, played: int, points: int, form: str, change: int = 0):
@@ -96,18 +121,24 @@ TABLE = [
 
 def test_notes_name_the_runs_the_movers_and_games_in_hand() -> None:
     assert standings_notes(TABLE) == [
-        "Hottest run: FC Westchester, 5 straight wins.",
-        "Coldest run: Downtown United Soccer Club, 5 straight losses.",
-        "Biggest climb since the last match day: IFA, up 5.",
-        "Biggest drop since the last match day: Valeo Futbol Club, down 3.",
-        "Games in hand: FC Westchester (18 pts from 6, 3.00 per game) has played 3 fewer "
-        "than leader Metropolitan Oval (22 from 9, 2.44).",
+        "Hottest run: **FC Westchester**, 5 straight wins.",
+        "Coldest run: **Downtown United Soccer Club**, 5 straight losses.",
+        "Biggest climb since the last match day: **IFA**, up 5.",
+        "Biggest drop since the last match day: **Valeo Futbol Club**, down 3.",
+        "Games in hand: **FC Westchester** (18 pts from 6, 3.00 per game) has played 3 fewer "
+        "than leader **Metropolitan Oval** (22 from 9, 2.44).",
     ]
 
 
 def test_movement_and_form_cells() -> None:
     rows = standings_table({**STANDINGS, "rows": TABLE})["rows"]
-    assert [r[8:] for r in rows[3:6]] == [["LLLWW", "▲4"], ["LLWLW", "▲5"], ["WWLLL", "▼3"]]
+    # Movement rides in the # column; form is squares, oldest first (newest on the right).
+    assert [(r[0], r[8]) for r in rows[3:6]] == [
+        ("6 ▲4", "🟥🟥🟥🟩🟩"),
+        ("10 ▲5", "🟥🟥🟩🟥🟩"),
+        ("12 ▼3", "🟩🟩🟥🟥🟥"),
+    ]
+    assert rows[2][8] == "🟩🟩🟩🟩🟨"
 
 
 def test_quiet_table_has_no_notes() -> None:
@@ -118,9 +149,9 @@ def test_quiet_table_has_no_notes() -> None:
 def test_ties_name_two_teams_and_no_form_is_no_run() -> None:
     rows = [_row(1, "A", 4, 12, "WWWW"), _row(2, "B", 4, 9, "LWWW"), _row(3, "C", 4, 9, "")]
     del rows[2]["form"]
-    assert standings_notes(rows) == ["Hottest run: A, 4 straight wins."]
+    assert standings_notes(rows) == ["Hottest run: **A**, 4 straight wins."]
     rows[1]["form"] = list("WWWW")
-    assert standings_notes(rows)[0] == "Hottest run: A and B, 4 straight wins."
+    assert standings_notes(rows)[0] == "Hottest run: **A** and **B**, 4 straight wins."
 
 
 def test_leader_with_best_rate_or_small_gap_is_no_games_in_hand() -> None:
