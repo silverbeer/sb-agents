@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import os
+from collections.abc import Callable
 from typing import Any
 
 from google.adk.agents import LlmAgent
@@ -18,13 +19,13 @@ from google.adk.models.base_llm import BaseLlm
 from google.adk.tools.mcp_tool import McpToolset, StreamableHTTPConnectionParams
 from sb_models import resolve
 
+from mt_agent.mt_client import CLIENT_HEADER, DEFAULT_MCP_URL
+
 # ADK probes for Google mTLS before every MCP session (google.auth.default(), which
 # off-GCP waits on the metadata server for seconds). Measured in MT, SB-1302.
 os.environ.setdefault("GOOGLE_API_USE_CLIENT_CERTIFICATE", "false")
 
 NAME = "mt_agent"  # ADK agent names must be identifiers; the A2A card says "mt-agent"
-DEFAULT_MCP_URL = "https://api.missingtable.com/mcp/"
-CLIENT_HEADER = "sb-agents"  # X-MT-Client: can only narrow the tiers mt-mcp lists
 TOOLS = (
     "search_teams",
     "list_divisions",
@@ -47,6 +48,9 @@ matches and standings. Use ONLY your tools; only state facts that appear in tool
   resolve X with search_teams too, then pass its team_id as opponent_id. "matches": [] means
   no played match was found; only an "error" means the data is unavailable. The "summary"
   covers only the matches returned.
+- A match preview ("preview Saturday's game", "what should we expect against X?"): resolve
+  the team with search_teams, then call match_preview with its team_id and age_group id,
+  and relay the preview it returns as is. "not_found" means no upcoming match is scheduled.
 - A table named by its division or league, not a team ("U15 Northeast", "the Flex New
   England table"): find it with list_divisions (filter by age_group and query), then call
   get_standings with that division id and age_group id. If it says "not_found", tell them
@@ -125,15 +129,56 @@ def _after_tool(tool: Any, args: dict[str, Any], tool_context: Any, tool_respons
     return None if result is tool_response else result
 
 
-def build_agent(model: BaseLlm | str | None = None, toolset: McpToolset | None = None) -> LlmAgent:
+def preview_tool(model: BaseLlm, connect_kwargs: dict[str, Any] | None = None) -> Callable:
+    """`match_preview` for the agent: runs the preview Workflow (mt_agent.preview)."""
+    from mt_agent.preview import run_preview
+    from mt_agent.runner import CURRENT_RUN, record_usage
+
+    def usage(event: Any) -> None:
+        run = CURRENT_RUN.get()
+        if run is not None:
+            record_usage(run, event, model.model)
+
+    async def match_preview(team_id: int, age_group_id: int) -> dict[str, Any]:
+        """A short preview of the team's next match: fixture, both teams' recent form,
+        the table and the head-to-head, from MT data. Use team_id and age_group.id from
+        search_teams. Returns {"preview": text}, or "not_found" when nothing is scheduled."""
+        return await run_preview(
+            team_id, age_group_id, model, on_model_event=usage, connect_kwargs=connect_kwargs
+        )
+
+    return match_preview
+
+
+def build_agent(
+    model: BaseLlm | str | None = None,
+    toolset: McpToolset | None = None,
+    *,
+    preview: bool = True,
+    preview_connect: dict[str, Any] | None = None,
+) -> LlmAgent:
+    """`preview=False` drops match_preview: the agent then previews with its own tool
+    calls (the single-agent baseline the eval compares against)."""
     if model is None or isinstance(model, str):
         # Registry default or $MT_AGENT_MODEL; the registry limits mt-agent to Anthropic.
         model = AnthropicLlm(model=resolve("mt-agent", model, check_credentials=False).name)
+    tools: list[Any] = [toolset or build_toolset()]
+    if preview:
+        tools.append(preview_tool(model, preview_connect))
+    instruction = INSTRUCTIONS
+    if not preview:
+        instruction = INSTRUCTIONS.replace(
+            "then call match_preview with its team_id and age_group id,\n"
+            '  and relay the preview it returns as is. "not_found" means no upcoming match is '
+            "scheduled.",
+            "then gather the next fixture, both teams' recent results, the\n"
+            "  table and the head-to-head with your tools, and write a short preview from them.",
+        )
     return LlmAgent(
         name=NAME,
         model=model,
         description="Answers questions about MissingTable teams, matches and standings.",
-        instruction=INSTRUCTIONS,
-        tools=[toolset or build_toolset()],
+        instruction=instruction,
+        tools=tools,
         after_tool_callback=_after_tool,
     )
