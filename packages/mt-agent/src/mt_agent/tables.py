@@ -19,29 +19,52 @@ class Table(TypedDict):
     columns: list[str]
     rows: list[list[str]]
     notes: NotRequired[list[str]]  # trends computed here, from the data (SB-1533)
+    # Row indexes (0-based, header excluded) to emphasize: the team the question named.
+    highlight: NotRequired[list[int]]
+
+
+# Form as squares reads at a glance; the channel needs no legend for W/D/L letters.
+FORM_SQUARES = {"W": "🟩", "D": "🟨", "L": "🟥"}
 
 
 def _name(team: dict[str, Any] | None) -> str:
     return (team or {}).get("name") or "?"
 
 
+def standings_title(result: dict[str, Any]) -> str:
+    """ "U15 Homegrown Northeast · 51 of 190 matches played".
+
+    The competition is named only when the table's league doesn't already say it
+    (a Flex division's Flex table is just "Flex New England").
+    """
+    division = result.get("division") or {}
+    age = (result.get("age_group") or {}).get("name")
+    league = division.get("league")
+    parts = [" ".join(p for p in (age, league, division.get("name")) if p)]
+    competition = result.get("competition") or "League"
+    if competition.lower() not in {"league", (league or "").lower()}:
+        parts.append(f"{competition} record" if competition == "qualifying" else competition)
+    coverage = result.get("coverage") or {}
+    if isinstance(coverage.get("matches_counted"), int) and isinstance(
+        coverage.get("fixtures"), int
+    ):
+        parts.append(f"{coverage['matches_counted']} of {coverage['fixtures']} matches played")
+    elif (result.get("meta") or {}).get("coverage"):
+        parts.append(result["meta"]["coverage"])
+    return " · ".join(p for p in parts if p)
+
+
 def standings_table(result: dict[str, Any]) -> Table | None:
     rows = result.get("rows")
     if result.get("error") or not rows:
         return None
-    division = result.get("division") or {}
-    age = (result.get("age_group") or {}).get("name") or ""
-    where = " ".join(p for p in (division.get("league"), division.get("name"), age) if p)
-    title = f"{where} ({result.get('competition') or 'League'})".strip()
-    coverage = (result.get("meta") or {}).get("coverage")
-    if coverage:
-        title += f": {coverage}"
+    shown = rows[:MAX_ROWS]
     return Table(
-        title=title,
-        columns=["#", "Team", "P", "W", "D", "L", "GD", "Pts", "Last 5", "±"],
+        title=standings_title(result),
+        columns=["#", "Team", "P", "W", "D", "L", "GD", "Pts", "Form →"],
         rows=[
             [
-                str(r["position"]),
+                f"{r['position']} {_movement(r.get('position_change') or 0)}".strip(),
                 _name(r.get("team")),
                 str(r["played"]),
                 str(r["wins"]),
@@ -49,12 +72,12 @@ def standings_table(result: dict[str, Any]) -> Table | None:
                 str(r["losses"]),
                 f"{r['goal_difference']:+d}" if "goal_difference" in r else "",
                 str(r["points"]),
-                "".join(r.get("form") or []),
-                _movement(r.get("position_change") or 0),
+                "".join(FORM_SQUARES.get(x, x) for x in r.get("form") or []),
             ]
-            for r in rows[:MAX_ROWS]
+            for r in shown
         ],
         notes=standings_notes(rows),
+        highlight=[i for i, r in enumerate(shown) if r.get("is_requested_team")],
     )
 
 
@@ -77,8 +100,13 @@ def _run(form: list[str], results: set[str]) -> int:
     return count
 
 
+def _bold(text: str) -> str:
+    """Notes use CommonMark bold; each channel renders it its own way."""
+    return f"**{text}**"
+
+
 def _names(rows: list[dict[str, Any]]) -> str:
-    return " and ".join(_name(r.get("team")) for r in rows[:2])
+    return " and ".join(_bold(_name(r.get("team"))) for r in rows[:2])
 
 
 def _best(rows: list[dict[str, Any]], key: Any, minimum: float) -> tuple[float, list[dict]]:
@@ -127,9 +155,9 @@ def _games_in_hand(rows: list[dict[str, Any]]) -> list[str]:
     if best is leader or gap < MIN_PLAYED_GAP:
         return []
     return [
-        f"Games in hand: {_name(best.get('team'))} ({best['points']} pts from "
+        f"Games in hand: {_bold(_name(best.get('team')))} ({best['points']} pts from "
         f"{best['played']}, {best['points'] / best['played']:.2f} per game) has played "
-        f"{gap} fewer than leader {_name(leader.get('team'))} ({leader['points']} from "
+        f"{gap} fewer than leader {_bold(_name(leader.get('team')))} ({leader['points']} from "
         f"{leader['played']}, {leader['points'] / leader['played']:.2f})."
     ]
 

@@ -30,6 +30,10 @@ You are sb-agent, the support assistant for silverbeer (SB) projects, answering 
 - For questions about an SB project, call the specialist tool that fits and relay its
   answer. Keep any sources its answer cites. Do not add facts it did not give you, and
   never add a confidence or source line of your own: confidence is reported separately.
+- A specialist's answer may say a table is shown under your reply: keep to its headline;
+  never list the rows, say the data is incomplete, or suggest asking again for it.
+- Pass the user's own words for names and abbreviations ("HG", "NEFC"); don't expand or
+  reinterpret them, the specialist resolves them.
 - Follow-up questions in a thread refer to the earlier conversation: make the question
   you pass to a specialist self-contained (resolve "it", "that", "the other one").
 - Greetings and small talk: answer yourself, without tools.
@@ -79,6 +83,18 @@ class SupportDeps:
         return None
 
 
+def shown_note(tables: list[Table]) -> str:
+    """Tell the model what the user will see under its reply, so it doesn't call it missing."""
+    if not tables:
+        return ""
+    table = tables[0]  # the channel shows one table a reply
+    notes = f" and {len(table.notes)} trend notes" if table.notes else ""
+    return (
+        f'\n\n[Shown to the user under your reply: the table "{table.title}" with all '
+        f"{len(table.rows)} rows{notes}. Don't repeat them, and don't say they are missing.]"
+    )
+
+
 def specialist_tool(specialist: Specialist) -> Tool[SupportDeps]:
     async def ask(ctx: RunContext[SupportDeps], question: str) -> str:
         """Args:
@@ -101,7 +117,7 @@ def specialist_tool(specialist: Specialist) -> Tool[SupportDeps]:
             return f"{specialist.name} is unavailable right now ({exc})."
         call.confidence = answer.confidence
         call.tables = parse_tables(answer.data)
-        return answer.text
+        return answer.text + shown_note(call.tables)
 
     return Tool(
         ask, name=specialist.tool_name, description=specialist.tool_description, takes_ctx=True

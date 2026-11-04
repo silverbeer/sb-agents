@@ -18,6 +18,7 @@ class Table:
     columns: list[str]
     rows: list[list[str]]
     notes: list[str] = field(default_factory=list)  # the specialist's trend lines (SB-1533)
+    highlight: list[int] = field(default_factory=list)  # row indexes to emphasize (SB-1535)
 
 
 def parse_tables(data: Any) -> list[Table]:
@@ -38,9 +39,8 @@ def parse_tables(data: Any) -> list[Table]:
                 title=str(raw.get("title") or ""),
                 columns=[_cell(c) for c in columns],
                 rows=[[_cell(c) for c in r] for r in rows],
-                notes=[str(n) for n in raw.get("notes") or [] if n]
-                if isinstance(raw.get("notes"), list)
-                else [],
+                notes=_notes(raw.get("notes")),
+                highlight=_highlight(raw.get("highlight"), len(rows)),
             )
         )
     return out
@@ -51,3 +51,19 @@ def _cell(value: Any) -> str:
     if isinstance(value, float) and value.is_integer():
         return str(int(value))
     return "" if value is None else str(value)
+
+
+def _notes(value: Any) -> list[str]:
+    return [_cell(n) for n in value if n not in (None, "")] if isinstance(value, list) else []
+
+
+def _highlight(value: Any, n_rows: int) -> list[int]:
+    """Valid row indexes only; a2a-sdk turns ints into floats on the way."""
+    if not isinstance(value, list):
+        return []
+    out = []
+    for i in value:
+        if isinstance(i, (int, float)) and not isinstance(i, bool) and float(i).is_integer():
+            if 0 <= int(i) < n_rows:
+                out.append(int(i))
+    return out

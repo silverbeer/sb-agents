@@ -144,7 +144,12 @@ async def test_docs_client_unreachable_raises_docs_agent_error() -> None:
 # --- tables (SB-1528) ----------------------------------------------------------------
 
 
-def _reply_with_table(text: str = "IFA are 10th.", notes: list[str] | None = None, **kw):
+def _reply_with_table(
+    text: str = "IFA are 10th.",
+    notes: list[str] | None = None,
+    highlight: list[int] | None = None,
+    **kw,
+):
     from sb_support.core import Reply
     from sb_support.tables import Table
 
@@ -153,6 +158,7 @@ def _reply_with_table(text: str = "IFA are 10th.", notes: list[str] | None = Non
         ["#", "Team", "Pts"],
         [["1", "Metropolitan Oval", "22"], ["10", "IFA", "6"]],
         notes or [],
+        highlight or [],
     )
     return Reply(text, tables=[table], **kw)
 
@@ -193,6 +199,22 @@ async def test_trend_notes_follow_the_table_in_blocks_and_in_the_fallback() -> N
         .kwargs["text"]
         .endswith("```\n" + "\n".join(notes))
     )
+
+
+async def test_the_highlighted_row_is_bold_rich_text_and_notes_use_slack_bold() -> None:
+    from sb_support.slack import post_reply
+
+    reply = _reply_with_table(notes=["Hottest run: **IFA**, 3 straight wins."], highlight=[1])
+    client = fake_client()
+    await post_reply(client, "C1", "111.1", reply)
+    *_, table, notes = client.chat_postMessage.await_args.kwargs["blocks"]
+    header, plain, bold = table["rows"]
+    assert {c["type"] for c in header + plain} == {"raw_text"}
+    cell = bold[1]
+    assert cell["type"] == "rich_text"
+    [text] = cell["elements"][0]["elements"]
+    assert text == {"type": "text", "text": "IFA", "style": {"bold": True}}
+    assert notes["elements"][0]["text"] == "• Hottest run: *IFA*, 3 straight wins."
 
 
 async def test_rejected_blocks_fall_back_to_a_code_block() -> None:
