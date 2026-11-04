@@ -10,7 +10,7 @@ OBS_ENV    := OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318 \
               SB_OBS_CAPTURE_CONTENT=$(or $(SB_OBS_CAPTURE_CONTENT),1) \
               PYDANTIC_AI_NO_BANNER=1
 
-.PHONY: obs-up obs-down obs-logs dashboards eval docs-a2a mt-a2a support ask adk-ask test lint deploy deploy-apply
+.PHONY: obs-up obs-down obs-logs dashboards eval mt-eval docs-a2a mt-a2a support ask adk-ask test lint deploy deploy-apply
 
 GRAFANA_DIR := $(CURDIR)/observability/grafana
 PROVISIONING := /otel-lgtm/grafana/conf/provisioning
@@ -68,6 +68,10 @@ support:
 # Real model + Sonnet judge: ~$0.1 per run (measured in SB-1488). On demand, not in CI.
 eval:
 	$(OBS_ENV) $(OP) uv run docs-agent eval
+
+# mt-agent eval, ground truth read live from mt-mcp: ~$0.04 per run (SB-1493).
+mt-eval:
+	$(OBS_ENV) op run --env-file=.env.op --env-file=.env.mt.op -- uv run mt-agent-eval
 
 ask:
 	$(OBS_ENV) $(OP) uv run docs-agent ask -v "$(Q)"
