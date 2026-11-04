@@ -16,7 +16,7 @@ def test_shipped_registry_loads_and_every_default_resolves() -> None:
     for agent in AGENTS:
         spec = reg.resolve(agent, env=KEYS)
         assert spec.ref in reg.models
-    assert reg.resolve("docs-agent", env=KEYS).ref == "openrouter:deepseek/deepseek-v4.1-flash"
+    assert reg.resolve("docs-agent", env=KEYS).ref == "anthropic:claude-haiku-5-5"
     assert reg.resolve("sb-support", env=KEYS).ref == "anthropic:claude-haiku-5-5"
 
 
