@@ -28,7 +28,9 @@ local = true
 # `providers` limits which providers an agent's framework can drive.
 
 [agents.docs-agent]
-model = "anthropic:claude-haiku-5-5"
+# DeepSeek since SB-1490: 14/14 twice at 100k token cap, ~1/8 Haiku's cost, faster.
+# Fallback by env: DOCS_AGENT_MODEL=openrouter:z-ai/glm-5.3-flash (14/14 x3) or Haiku.
+model = "openrouter:deepseek/deepseek-v4.1-flash"
 env = "DOCS_AGENT_MODEL"
 needs = { tools = true, structured_output = true, min_context = 16384 }
 
@@ -75,13 +77,13 @@ structured_output = true
 context_window = 1_048_576
 tools = true
 structured_output = true
-eval = { suite = "docs-agent", passed = 13, cases = 14, date = "2026-11-01" }
+eval = { suite = "docs-agent", passed = 14, cases = 14, date = "2026-11-04" }
 
 [models."openrouter:z-ai/glm-5.3-flash"]
 context_window = 1_048_576
 tools = true
 structured_output = true
-eval = { suite = "docs-agent", passed = 14, cases = 14, date = "2026-11-01" }
+eval = { suite = "docs-agent", passed = 14, cases = 14, date = "2026-11-04" }
 
 [models."openrouter:nvidia/nemotron-3.5-super-vl:free"]
 context_window = 1_000_000

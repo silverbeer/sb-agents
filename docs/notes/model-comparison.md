@@ -1,7 +1,7 @@
 # Model comparison: docs-agent evals (SB-1490)
 
 Same 14-case docs-agent eval (13 before SB-1476 added `partial-oncall-name`), same
-Sonnet 5.5 judge, same per-run caps (8 requests, 12 tool calls, 60k tokens).
+Sonnet 5.5 judge, same per-run caps (8 requests, 12 tool calls, 60k tokens; 100k from 2026-11-04).
 OpenRouter rows measured 2026-11-01: `:free` first on a key with no credits, then paid
 models after a $25 credit purchase.
 
@@ -20,6 +20,26 @@ models after a $25 credit purchase.
 
 \* Eval runs 4 cases at a time against one Ollama, so this includes queueing. A single
 run took about 100 s (SB-1490 smoke test: 4 requests, 6.9k in / 1.5k out tokens).
+
+### Repeat runs (2026-11-04)
+
+Two more runs each before changing a default, as the findings below asked.
+
+| Model | Token cap | Run | Passed | Agent $ / eval | Avg latency per case | Failure |
+|---|---|---|---|---|---|---|
+| deepseek/deepseek-v4.1-flash | 60k | 2 | 13/14 | $0.0027 | 5.6 s | `mt-prod-deploy`: 70,254 tokens > 60k cap |
+| deepseek/deepseek-v4.1-flash | 60k | 3 | 13/14 | $0.0020 | 4.8 s | `mt-prod-deploy`: 73,852 tokens > 60k cap |
+| deepseek/deepseek-v4.1-flash | 100k | 4 | **14/14** | $0.0026 | — | — |
+| deepseek/deepseek-v4.1-flash | 100k | 5 | **14/14** | $0.0025 | — | — |
+| z-ai/glm-5.3-flash | 60k | 2 | **14/14** | $0.0178 | 5.6 s | — |
+| z-ai/glm-5.3-flash | 60k | 3 | **14/14** | $0.0161 | 5.4 s | — |
+
+DeepSeek's only failure, three runs out of three, was the same case hitting the token
+cap: it reads more doc text than Haiku on `mt-prod-deploy`, then answers correctly.
+The cap went to 100k (`docs_agent/agent.py`): `cost_limit` ($0.02) is the money guard,
+and the token cap only stops a runaway loop. All judge scores (Calibrated,
+CitedExpectedSource, LLMJudge) were 100% on every run that finished. Haiku's 14/14 was at
+60k and never came near the cap, so the change doesn't affect its result.
 
 Judge cost per eval: $0.046 (Haiku), $0.016 (gemma 4k: only 5 cases reached the judge),
 $0.039 (gemma 16k).
@@ -97,10 +117,14 @@ $0.029 / $0.092, openai/gpt-6-luna $0.10 / $0.50, qwen/qwen3.8-flash $0.15 / $0.
 Haiku 5.5 is $0.10 / $0.50 direct, so the cheap paid tier is about the same price; only
 GLM flash is clearly cheaper. The reason to run them is quality per dollar, not price.
 
-## Recommendation per role (so far)
+## Recommendation per role (2026-11-04)
 
-- **Specialist (docs-agent):** keep Haiku for now. DeepSeek-v4.1-flash is the candidate to
-  replace it (9x cheaper, faster, 13/14), pending repeat evals and a token cap decision.
-  GLM-5.3-flash is a like-for-like fallback. nemotron `:free` is fine for experiments.
-- **Router (sb-support / ADK):** keep Haiku; the ADK side can't switch yet (LiteLLM conflict).
+- **Specialist (docs-agent): DeepSeek-v4.1-flash is the default** (`models.toml`).
+  14/14 on both runs at the 100k cap, ~$0.0002 per question (about 1/8 of Haiku), fastest
+  p50. Fallbacks by env, no code change: `DOCS_AGENT_MODEL=openrouter:z-ai/glm-5.3-flash`
+  (14/14 on all three runs, about Haiku's price) or `anthropic:claude-haiku-5-5`.
+  Caveat: one provider account now sits on the hot path; automatic fallback is SB-1519.
+- **Router (sb-support):** keep Haiku. It drives the Slack conversation and escalation,
+  and has no eval of its own yet; switch only after one exists.
+- **Router (ADK / mt-agent):** keep Haiku; the ADK side can't switch (LiteLLM conflict).
 - **Judge:** keep Sonnet 5.5 so scores stay comparable.

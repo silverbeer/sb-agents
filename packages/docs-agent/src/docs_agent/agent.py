@@ -21,10 +21,13 @@ from sb_obs import track_run
 
 # Per-run caps. Measured (SB-1478): a question takes 3-4 requests, ~2-4 tool calls,
 # ~15k tokens and ~$0.002 on Haiku, so these leave ~2-4x headroom and stop a loop.
+# The token cap was 60k until SB-1490: DeepSeek-v4.1-flash read 70-74k tokens on one
+# case (mt-prod-deploy) every run. `cost_limit` is the money guard; the token cap only
+# stops a runaway, and 100k is ~$0.01 on Haiku, ~$0.005 on DeepSeek.
 USAGE_LIMITS = UsageLimits(
     request_limit=8,
     tool_calls_limit=12,
-    total_tokens_limit=60_000,
+    total_tokens_limit=100_000,
     cost_limit=Decimal("0.02"),
 )
 
