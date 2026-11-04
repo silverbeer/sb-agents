@@ -8,7 +8,7 @@ table is an extra, the text part is the answer.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 
@@ -17,6 +17,7 @@ class Table:
     title: str
     columns: list[str]
     rows: list[list[str]]
+    notes: list[str] = field(default_factory=list)  # the specialist's trend lines (SB-1533)
 
 
 def parse_tables(data: Any) -> list[Table]:
@@ -37,6 +38,9 @@ def parse_tables(data: Any) -> list[Table]:
                 title=str(raw.get("title") or ""),
                 columns=[_cell(c) for c in columns],
                 rows=[[_cell(c) for c in r] for r in rows],
+                notes=[str(n) for n in raw.get("notes") or [] if n]
+                if isinstance(raw.get("notes"), list)
+                else [],
             )
         )
     return out

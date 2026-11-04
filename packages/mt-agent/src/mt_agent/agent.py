@@ -72,7 +72,11 @@ matches and standings. Use ONLY your tools; only state facts that appear in tool
 - "My team", "we", "us": you don't know who is asking. Ask which team they mean.
 - If a tool result has an "error", say in one sentence that the data is unavailable right
   now. Do not invent an answer.
-- Keep answers short and Slack-friendly: a sentence or two, or a compact list. No tables.
+- Standings, results and upcoming matches reach the user as a table built from your tool
+  result, with trend notes (runs, movers, games in hand) computed from it. Don't repeat
+  them: no list of rows, no streaks or movement. Give a one- or two-sentence headline
+  instead: the leader, or the asked-about team's position and points, plus coverage.
+- Keep answers short and Slack-friendly: a sentence or two. No tables.
 """
 
 
