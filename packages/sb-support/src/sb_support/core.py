@@ -22,6 +22,7 @@ from pydantic_ai.messages import ModelMessage
 
 from sb_obs import track_run
 from sb_support.agent import USAGE_LIMITS, SupportDeps
+from sb_support.tables import Table
 
 log = logging.getLogger("sb_support")
 _tracer = trace.get_tracer("sb_support")
@@ -58,6 +59,7 @@ class Reply:
     outcome: Outcome = "answered"
     escalation: str | None = None  # reason a human should take over
     routed_to: list[str] = field(default_factory=list)
+    tables: list[Table] = field(default_factory=list)  # from the specialist's data part
 
 
 class ConversationMemory:
@@ -119,6 +121,7 @@ async def answer(
         "escalated" if reason else "answered",
         escalation=reason,
         routed_to=deps.routed_to,
+        tables=deps.tables,
     )
 
 

@@ -48,6 +48,17 @@ tools whose data it used. mt-agent's data part:
 
 a2a-sdk 1.x carries data parts as protobuf `Value`s, so numbers arrive as floats (`2.0`).
 
+**Tables (SB-1528).** The data part may also carry `tables: [{title, columns, rows}]`,
+all cells strings (so no `2.0`). mt-agent builds them in `tables.py` from the latest
+result of `get_standings`, `get_recent_results` and `get_upcoming_matches` (at most 25
+rows), never from the model's text. The text part is unchanged; a channel decides how to
+show a table. sb-support (`sb_support/tables.py`) keeps well-formed tables on
+`Reply.tables`, and the Slack adapter posts the first as a Block Kit `table` block (first
+row = header, numeric columns right-aligned) under the text, or, if Slack rejects the
+blocks or the text is over a section's 3,000 characters, as a code block. Limits from
+docs.slack.dev/reference/block-kit/blocks/table-block: 100 rows, 20 cells a row, 10,000
+characters across a message's table cells.
+
 ## Confidence is a rule over tool results, not the model's opinion
 
 `runner.ToolLedger` watches the run's tool calls and results; the confidence is:

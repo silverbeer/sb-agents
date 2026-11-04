@@ -21,6 +21,7 @@ from sb_obs import setup_telemetry
 from sb_support.agent import build_agent
 from sb_support.core import InboundMessage, Reply, SupportCore
 from sb_support.specialists import discover
+from sb_support.tables import Table
 
 log = logging.getLogger("sb_support.slack")
 
@@ -78,6 +79,73 @@ def escalation_text(reason: str) -> str:
     return f"\n\n:raising_hand: Escalating to {mention}: {reason}."
 
 
+# Block Kit limits (docs.slack.dev/reference/block-kit/blocks/table-block, read 2026-11-04):
+# 100 rows, 20 cells a row, 10,000 characters across a message's table cells; a section's
+# mrkdwn text is at most 3,000 characters.
+TABLE_MAX_ROWS, TABLE_MAX_COLS, TABLE_MAX_CHARS, SECTION_MAX = 100, 20, 10_000, 3_000
+_NUMERIC = re.compile(r"^[+-]?\d+$")
+
+
+def table_block(table: Table) -> dict[str, Any] | None:
+    """A Block Kit table (first row is the header), or None if it breaks a limit."""
+    rows = [table.columns, *table.rows]
+    chars = sum(len(c) for r in rows for c in r)
+    if len(rows) > TABLE_MAX_ROWS or len(table.columns) > TABLE_MAX_COLS or chars > TABLE_MAX_CHARS:
+        return None
+    numeric = [
+        bool(table.rows) and all(_NUMERIC.match(r[i] or "0") for r in table.rows)
+        for i in range(len(table.columns))
+    ]
+    return {
+        "type": "table",
+        "column_settings": [{"align": "right"} if n else None for n in numeric],
+        "rows": [[{"type": "raw_text", "text": c or " "} for c in r] for r in rows],
+    }
+
+
+def table_as_code(table: Table) -> str:
+    """The fallback: an aligned monospace table, for when blocks can't be sent."""
+    rows = [table.columns, *table.rows]
+    widths = [max(len(r[i]) for r in rows) for i in range(len(table.columns))]
+    lines = ["  ".join(c.ljust(w) for c, w in zip(r, widths, strict=True)).rstrip() for r in rows]
+    title = f"*{table.title}*\n" if table.title else ""
+    return f"{title}```\n" + "\n".join(lines) + "\n```"
+
+
+def blocks_for(reply: Reply, text: str) -> list[dict[str, Any]] | None:
+    """Text + the first table as Block Kit, or None (send plain text). One table per reply."""
+    if reply.outcome == "help" or not reply.tables or len(text) > SECTION_MAX:
+        return None
+    table = reply.tables[0]
+    block = table_block(table)
+    if block is None:
+        return None
+    out: list[dict[str, Any]] = [{"type": "section", "text": {"type": "mrkdwn", "text": text}}]
+    if table.title:
+        out.append(
+            {"type": "context", "elements": [{"type": "mrkdwn", "text": f"*{table.title}*"}]}
+        )
+    out.append(block)
+    return out
+
+
+async def post_reply(client: Any, channel: str, thread_ts: str, reply: Reply) -> None:
+    """Post the reply; a table goes as a Block Kit table, else as a code block."""
+    text = render(reply)
+    blocks = blocks_for(reply, text)
+    if blocks is not None:
+        try:
+            await client.chat_postMessage(
+                channel=channel, thread_ts=thread_ts, text=text, blocks=blocks
+            )
+            return
+        except Exception:  # noqa: BLE001 - e.g. invalid_blocks: fall back, don't lose the reply
+            log.warning("table blocks rejected; posting a code block instead", exc_info=True)
+    if reply.tables and reply.outcome != "help":
+        text = f"{text}\n\n{table_as_code(reply.tables[0])}"
+    await client.chat_postMessage(channel=channel, thread_ts=thread_ts, text=text)
+
+
 async def _react(client: Any, channel: str, ts: str, name: str, *, remove: bool = False) -> None:
     """Best-effort reaction; a failed emoji must never break the reply."""
     try:
@@ -95,7 +163,7 @@ async def handle_event(event: dict[str, Any], client: Any, core: SupportCore) ->
     try:
         reply = await core.handle(to_inbound(event))
         reaction = OUTCOME_REACTION[reply.outcome]
-        await client.chat_postMessage(channel=channel, thread_ts=thread_ts, text=render(reply))
+        await post_reply(client, channel, thread_ts, reply)
     except Exception:
         log.exception("failed to post reply in %s at %s", channel, ts)
         reaction = FAILED
