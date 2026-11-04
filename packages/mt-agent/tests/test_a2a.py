@@ -69,7 +69,12 @@ async def test_clean_answer_has_text_and_high_confidence_data_part() -> None:
     # The phase-1 identity and client header reach mt-mcp; get_my_team is filtered out.
     assert {h.get("x-mt-client") for h in stub.headers} == {"sb-agents"}
     assert {h.get("authorization") for h in stub.headers} == {"Bearer t0k"}
-    assert model.declared_tools() == ["get_standings", "get_upcoming_matches", "search_teams"]
+    assert model.declared_tools() == [
+        "get_recent_results",
+        "get_standings",
+        "get_upcoming_matches",
+        "search_teams",
+    ]
     # The model saw the tool's own result, not the MCP envelope.
     assert model.tool_results()[-1]["coverage"] == {"matches_counted": 18, "fixtures": 42}
 

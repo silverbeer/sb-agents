@@ -75,6 +75,35 @@ def test_clean_tool_results_are_high_confidence() -> None:
     }
 
 
+def test_a_gap_followed_by_clean_data_from_another_tool_is_resolved() -> None:
+    # "FC Westchester" without an age: ambiguous, but every candidate is one team_id,
+    # and the model went on to read results with it.
+    assert (
+        ledger(
+            tool_event("search_teams", {"status": "resolved"}),
+            tool_event("search_teams", AMBIGUOUS_SEARCH),
+            tool_event("get_recent_results", {"matches": [], "error": None}),
+        ).confidence
+        == "high"
+    )
+    # An error is not resolved by a later success elsewhere.
+    assert (
+        ledger(
+            tool_event("get_upcoming_matches", {"error": {"kind": "unavailable"}}),
+            tool_event("get_standings", {"rows": [], "error": None}),
+        ).confidence
+        == "low"
+    )
+    # A gap after the last clean result still ends the run on a question.
+    assert (
+        ledger(
+            tool_event("get_standings", {"rows": [], "error": None}),
+            tool_event("search_teams", AMBIGUOUS_SEARCH),
+        ).confidence
+        == "low"
+    )
+
+
 def test_ending_on_a_gap_or_error_is_low_confidence() -> None:
     assert ledger(tool_event("search_teams", AMBIGUOUS_SEARCH)).confidence == "low"
     assert ledger(tool_event("get_standings", AMBIGUOUS_TABLE)).report()["issues"] == [
@@ -132,7 +161,13 @@ def test_non_anthropic_model_is_refused_with_the_reason(monkeypatch: pytest.Monk
     monkeypatch.setenv("MT_AGENT_MODEL", "openrouter:deepseek/deepseek-v4.1-flash")
     with pytest.raises(ModelConfigError, match="LiteLLM"):
         build_agent(toolset=build_toolset(MCP_URL, "t"))
-    assert TOOLS == ("search_teams", "list_divisions", "get_upcoming_matches", "get_standings")
+    assert TOOLS == (
+        "search_teams",
+        "list_divisions",
+        "get_upcoming_matches",
+        "get_recent_results",
+        "get_standings",
+    )
 
 
 async def run(runner: TrackedRunner, session_id: str = "s1") -> list[Event]:

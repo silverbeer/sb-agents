@@ -135,6 +135,16 @@ class StubMcp:
             return self._result("get_upcoming_matches", team_id=team_id)
 
         @server.tool()
+        def get_recent_results(
+            team_id: int,
+            age_group_id: int | None = None,
+            limit: int = 5,
+            opponent_id: int | None = None,
+        ) -> dict[str, Any]:
+            """A team's last played matches."""
+            return self._result("get_recent_results", team_id=team_id, opponent_id=opponent_id)
+
+        @server.tool()
         def get_standings(
             team_id: int | None = None,
             age_group_id: int | None = None,

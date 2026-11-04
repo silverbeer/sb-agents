@@ -30,14 +30,15 @@ DEFAULT_HOST, DEFAULT_PORT = "127.0.0.1", 8102
 
 DESCRIPTION = (
     "Answers questions about MissingTable (MT) youth soccer data: finding teams, their "
-    "upcoming matches, and league standings with how many matches have been played. "
+    "recent results and head-to-head record, upcoming matches, and league standings with "
+    "how many matches have been played. "
     "Reads MT's live data. Returns a short answer and a confidence level."
 )
 EXAMPLES = [
     "When does IFA U14 play next?",
     "What are the standings for NEFC U15 in the League?",
     "How is Sporting U13 doing in Flex?",
-    "Which age groups does Bayside FC play in?",
+    "How did IFA U15 do last weekend?",
 ]
 
 
@@ -73,8 +74,8 @@ def build_card(url: str) -> AgentCard:
             AgentSkill(
                 id="mt-data",
                 name="Answer from MissingTable data",
-                description="Teams, upcoming matches and standings, with coverage stated.",
-                tags=["missingtable", "soccer", "standings", "matches"],
+                description="Teams, results, upcoming matches and standings, with coverage stated.",
+                tags=["missingtable", "soccer", "standings", "matches", "results"],
                 examples=EXAMPLES,
                 input_modes=["text/plain"],
                 output_modes=["text/plain", "application/json"],
