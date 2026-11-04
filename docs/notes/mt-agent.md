@@ -18,6 +18,7 @@ Slack ─► sb-support core ── ask_mt_agent ──A2A 1.0──► mt-agent
 | `agent.py` | `LlmAgent` (Claude via `AnthropicLlm`), instructions, `McpToolset` with `tool_filter`, MCP result unwrapping |
 | `runner.py` | `TrackedRunner`: caps, the RunRecord, and the reply's data part |
 | `a2a_server.py` | agent card, `to_a2a(...)`, `main()` (uvicorn, `instrument_asgi`, `setup_telemetry`) |
+| `sessions.py` | `BoundedSessionService`: one ADK session per A2A context, bounded by count and idle time |
 | `evals.py` | `mt-agent-eval`: ground truth from mt-mcp at eval time, four checks, EvalRecord |
 
 `to_a2a` attaches its routes in the app's **lifespan**, so a client in the same process
@@ -167,6 +168,44 @@ toolset per request with that token through `McpToolset(header_provider=...)`. T
 public identity until a Slack ↔ MT account link exists. Also open: auth between agents
 (SB-1480).
 
+## Follow-up questions: A2A contextId → ADK session (SB-1525)
+
+"Standings for IFA U15?" then "and their U14 team?" works because both messages carry
+the same A2A `contextId`:
+
+```
+sb-support ── contextId = uuid5("sb-support/<channel:thread>/mt-agent") ──► mt-agent
+                                     ADK A2A executor: session_id = contextId,
+                                     user_id = A2A_USER_<contextId> (caller unauthenticated)
+                                     get_session → reuse, else create_session
+```
+
+- **ADK does the mapping.** `to_a2a`'s executor (`google/adk/a2a/converters/request_converter.py`)
+  uses the request's `contextId` as the ADK session id, and creates the session on the
+  first message. Nothing in mt-agent had to map it; what was missing was a caller that
+  sends the same `contextId` twice.
+- **Opt-in per specialist, declared in the card.** mt-agent's card lists the extension
+  `urn:sb-agents:a2a:conversation:v1` under `capabilities.extensions`; sb-support's
+  `discover()` reads it and only those specialists get a stable `contextId`. docs-agent
+  doesn't declare it, on purpose: fasta2a replays a context's whole message history,
+  tool results included, so a reused context would carry every doc it read into the next
+  question and run into the token cap.
+- **The id is opaque.** A uuid5 of the conversation key and the specialist name: stable
+  for one Slack thread, different per specialist, and no channel or thread ids reach the
+  specialist. It is also stable across an sb-support restart.
+- **Sessions are bounded.** `InMemorySessionService` keeps every session forever, and a
+  caller that sends no `contextId` gets a new server-generated one per message, so the
+  process grew by a session per question. `BoundedSessionService` keeps at most 500 and
+  drops any idle for 30 minutes (and the per-context `A2A_USER_*` shells with them).
+  Lost on restart: a follow-up after a restart just starts over.
+- **sb-support still rewrites follow-ups** into self-contained questions (its
+  instructions say so), so the session is a second line, not the only one: it is what
+  lets mt-agent reuse the team it resolved and the table it picked, without a new
+  clarifying question.
+
+The eval's `follow-up` case runs "Where are IFA U15 in the league standings?" then
+"And their U14 team?" in one session and grades only the second reply.
+
 ## Evals: ground truth read live (SB-1493)
 
 ```bash
@@ -206,7 +245,7 @@ judge and `EvalRecord` as docs-agent, so the two compare) and borrows ADK's
 
 | Model | Runs | Passed | Agent $ / eval | Judge $ | Avg per case | Notes |
 |---|---|---|---|---|---|---|
-| claude-haiku-5-5 | 2 | **10/10, 10/10** | $0.012 (~$0.0012/question) | $0.03 | 3.3 s | default |
+| claude-haiku-5-5 | 2 | **10/10, 10/10** (11/11 with `follow-up`, SB-1525) | $0.012 (~$0.0012/question) | $0.03 | 3.3 s | default |
 | claude-sonnet-5-5 | 1 | 9/10 | $0.19 (~16x Haiku) | $0.03 | 4.1 s | `flex-table` hit the $0.02 per-run cost cap |
 
 Two things the eval caught while being built, both fixed:

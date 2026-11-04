@@ -97,7 +97,7 @@ async def answer(
 
     Raises `UsageLimitExceeded` and any agent error; `SupportCore.handle` maps them.
     """
-    deps = SupportDeps()
+    deps = SupportDeps(conversation_key=key)
     history = memory.history(key) if memory is not None and key else []
     with track_run("sb-support", caller=caller, model=agent.model) as run:
         try:

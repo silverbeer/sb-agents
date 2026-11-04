@@ -31,9 +31,9 @@ from google.adk.agents.invocation_context import LlmCallsLimitExceededError
 from google.adk.agents.run_config import RunConfig
 from google.adk.events import Event
 from google.adk.runners import Runner
-from google.adk.sessions import InMemorySessionService
 from google.genai import types
 
+from mt_agent.sessions import BoundedSessionService
 from sb_obs import RunHandle, price, track_run
 
 AGENT = "mt-agent"
@@ -147,7 +147,7 @@ class TrackedRunner(Runner):
         max_cost_usd: float = MAX_COST_USD,
         **kwargs: Any,
     ) -> None:
-        kwargs.setdefault("session_service", InMemorySessionService())
+        kwargs.setdefault("session_service", BoundedSessionService())
         super().__init__(app_name=agent.name, agent=agent, **kwargs)
         self.caller = caller
         self.max_llm_calls = max_llm_calls

@@ -54,6 +54,7 @@ JUDGE_MODEL = os.environ.get("MT_AGENT_JUDGE_MODEL", "anthropic:claude-sonnet-5-
 SUITE = "mt-agent"
 
 Confidence = Literal["high", "low"]
+Turns = list[str]  # a case's user messages, in one session; the last one is scored
 
 
 class TruthError(RuntimeError):
@@ -128,6 +129,7 @@ class Spec:
     name: str
     question: str
     truth: Callable[[MtTruth], Awaitable[Truth]]
+    before: tuple[str, ...] = ()  # earlier turns in the same session (follow-up cases)
 
 
 def _record(row: dict[str, Any]) -> str:
@@ -272,6 +274,22 @@ async def _other_ages(t: MtTruth) -> Truth:
     )
 
 
+async def _follow_up(t: MtTruth) -> Truth:
+    # Turn 1 asked about IFA U15; "their U14 team" only resolves from that context.
+    team_id, age_id = await t.team("IFA", "U14")
+    table = await t.call("get_standings", team_id=team_id, age_group_id=age_id)
+    row = t.row(table, team_id)
+    return Truth(
+        f"(Follow-up: 'their' is IFA, from the previous turn.) IFA U14 are {row['position']} "
+        f"with {row['points']} points ({_record(row)}).",
+        Meta(
+            facts=[str(row["position"]), str(row["points"])],
+            confidence="high",
+            tools=["search_teams", "get_standings"],
+        ),
+    )
+
+
 async def _my_team(t: MtTruth) -> Truth:
     return Truth(
         "The agent doesn't know who is asking: it should ask which team they mean.",
@@ -308,6 +326,12 @@ SPECS: list[Spec] = [
     Spec("ambiguous-team", "How is Metropolitan Oval doing in the standings?", _ambiguous_team),
     Spec("unknown-team", "What are the standings for Zxqv Rovers?", _unknown_team),
     Spec("other-ages", "What are the standings for IFA U12?", _other_ages),
+    Spec(
+        "follow-up",
+        "And their U14 team?",
+        _follow_up,
+        before=("Where are IFA U15 in the league standings?",),
+    ),
     Spec("my-team", "When is our next game?", _my_team),
     Spec(
         "no-qualification-call",
@@ -317,7 +341,7 @@ SPECS: list[Spec] = [
 ]
 
 
-async def build_cases(truth: MtTruth, specs: list[Spec] = SPECS) -> list[Case[str, Answer, Meta]]:
+async def build_cases(truth: MtTruth, specs: list[Spec] = SPECS) -> list[Case[Turns, Answer, Meta]]:
     """Ground truth for every case. All premises are checked before any model call."""
     cases, broken = [], []
     for spec in specs:
@@ -327,7 +351,12 @@ async def build_cases(truth: MtTruth, specs: list[Spec] = SPECS) -> list[Case[st
             broken.append(f"{spec.name}: {exc}")
             continue
         cases.append(
-            Case(name=spec.name, inputs=spec.question, expected_output=t.expected, metadata=t.meta)
+            Case(
+                name=spec.name,
+                inputs=[*spec.before, spec.question],
+                expected_output=t.expected,
+                metadata=t.meta,
+            )
         )
     if broken:
         raise TruthError("; ".join(broken))
@@ -345,23 +374,29 @@ class Answer:
     cost_usd: float | None = None
 
 
-async def ask(runner: TrackedRunner, question: str) -> Answer:
-    """One question through the real runner (caps, RunRecord), as A2A would run it."""
+async def ask(runner: TrackedRunner, turns: Turns) -> Answer:
+    """Each turn through the real runner (caps, RunRecord) in one session, as A2A runs a
+    conversation with a reused contextId. The answer, confidence and tools are the last
+    turn's; cost covers every turn."""
     session = await runner.session_service.create_session(app_name=runner.app_name, user_id="eval")
-    message = types.Content(role="user", parts=[types.Part(text=question)])
-    ledger, text, cost = ToolLedger(), "", None
-    async for event in runner.run_async(user_id="eval", session_id=session.id, new_message=message):
-        ledger.see(event)
-        if (u := event.usage_metadata) is not None and event.author == runner.agent.name:
-            c = price(
-                runner.model,
-                input_tokens=u.prompt_token_count or 0,
-                output_tokens=(u.candidates_token_count or 0) + (u.thoughts_token_count or 0),
-                cache_read_tokens=u.cached_content_token_count or 0,
-            )
-            cost = None if c is None else (cost or 0.0) + c
-        if is_answer(event, runner.agent.name):
-            text = "\n".join(p.text for p in event.content.parts if p.text)
+    cost: float | None = None
+    for question in turns:
+        message = types.Content(role="user", parts=[types.Part(text=question)])
+        ledger, text = ToolLedger(), ""
+        async for event in runner.run_async(
+            user_id="eval", session_id=session.id, new_message=message
+        ):
+            ledger.see(event)
+            if (u := event.usage_metadata) is not None and event.author == runner.agent.name:
+                c = price(
+                    runner.model,
+                    input_tokens=u.prompt_token_count or 0,
+                    output_tokens=(u.candidates_token_count or 0) + (u.thoughts_token_count or 0),
+                    cache_read_tokens=u.cached_content_token_count or 0,
+                )
+                cost = None if c is None else (cost or 0.0) + c
+            if is_answer(event, runner.agent.name):
+                text = "\n".join(p.text for p in event.content.parts if p.text)
     return Answer(text, ledger.confidence, ledger.calls, cost)
 
 
@@ -376,15 +411,15 @@ def mentions(text: str, fact: str) -> bool:
 
 
 @dataclass
-class FactsMentioned(Evaluator[str, Answer, Meta]):
-    def evaluate(self, ctx: EvaluatorContext[str, Answer, Meta]) -> bool | dict[str, bool]:
+class FactsMentioned(Evaluator[Turns, Answer, Meta]):
+    def evaluate(self, ctx: EvaluatorContext[Turns, Answer, Meta]) -> bool | dict[str, bool]:
         facts = ctx.metadata.facts if ctx.metadata else []
         return all(mentions(ctx.output.text, f) for f in facts) if facts else {}
 
 
 @dataclass
-class ConfidenceMatches(Evaluator[str, Answer, Meta]):
-    def evaluate(self, ctx: EvaluatorContext[str, Answer, Meta]) -> bool | dict[str, bool]:
+class ConfidenceMatches(Evaluator[Turns, Answer, Meta]):
+    def evaluate(self, ctx: EvaluatorContext[Turns, Answer, Meta]) -> bool | dict[str, bool]:
         expected = ctx.metadata.confidence if ctx.metadata else None
         return {} if expected is None else ctx.output.confidence == expected
 
@@ -401,19 +436,19 @@ _TRAJECTORY = TrajectoryEvaluator(
 )
 
 
-def _invocation(question: str, tools: list[str]) -> Invocation:
+def _invocation(turns: Turns, tools: list[str]) -> Invocation:
     calls = [types.FunctionCall(name=name, args={}) for name in tools]
     return Invocation(
-        user_content=types.Content(role="user", parts=[types.Part(text=question)]),
+        user_content=types.Content(role="user", parts=[types.Part(text=turns[-1])]),
         intermediate_data=IntermediateData(tool_uses=calls),
     )
 
 
 @dataclass
-class ToolPath(Evaluator[str, Answer, Meta]):
+class ToolPath(Evaluator[Turns, Answer, Meta]):
     """ADK's trajectory metric over one invocation: expected tools ran, in order."""
 
-    def evaluate(self, ctx: EvaluatorContext[str, Answer, Meta]) -> bool | dict[str, bool]:
+    def evaluate(self, ctx: EvaluatorContext[Turns, Answer, Meta]) -> bool | dict[str, bool]:
         expected = ctx.metadata.tools if ctx.metadata else []
         if not expected:
             return {}
@@ -428,13 +463,14 @@ RUBRIC = (
     "answer must agree with it: same facts, nothing that contradicts it. Extra correct "
     "detail is fine and dates may be written in any format. When the expected output says "
     "to ask a question or that nothing was found, the answer must do that instead of "
-    "guessing or inventing data."
+    "guessing or inventing data. The input lists the conversation's user messages; only "
+    "the reply to the last one is graded."
 )
 
 
 def build_dataset(
-    cases: list[Case[str, Answer, Meta]], judge: Model | str | None = None
-) -> Dataset[str, Answer, Meta]:
+    cases: list[Case[Turns, Answer, Meta]], judge: Model | str | None = None
+) -> Dataset[Turns, Answer, Meta]:
     return Dataset(
         name=SUITE,
         cases=cases,
@@ -470,8 +506,8 @@ async def run_evals(only: list[str] | None = None, verbose: bool = False) -> flo
     judge = PricedModel(JUDGE_MODEL)
     agent_cost: list[float] = []
 
-    async def answer(question: str) -> Answer:
-        out = await ask(runner, question)
+    async def answer(turns: Turns) -> Answer:
+        out = await ask(runner, turns)
         if out.cost_usd is not None:
             agent_cost.append(out.cost_usd)
         return out

@@ -145,3 +145,40 @@ async def test_sb_support_discovers_and_asks_both_adk_and_fasta2a_specialists() 
     assert "uv tool install janitor-cli" in docs_answer.text
     assert docs_answer.confidence == "high"
     assert docs_answer.data["sources"][0]["ref"] == "janitor/README.md"
+
+
+# --- follow-up questions (SB-1525) ---------------------------------------------------
+
+
+def _texts(request) -> list[str]:
+    return [p.text for c in request.contents for p in c.parts or [] if p.text]
+
+
+async def test_same_context_id_continues_the_conversation() -> None:
+    model = standings_script(
+        says("IFA is 1st in the U14 League."),
+        calls_tool("search_teams", query="IFA", age_group="U13"),
+        says("IFA U13 is 2nd."),
+        says("Which team do you mean?"),
+    )
+    async with served(model) as http:
+        client = SpecialistClient(BASE, http)
+        await client.ask("IFA U14 standings?", context_id="ctx-a")
+        await client.ask("and U13?", context_id="ctx-a")
+        await client.ask("and U13?", context_id="ctx-b")  # a new conversation
+
+    follow_up = _texts(model.requests[3])  # first model call of the second question
+    assert "IFA U14 standings?" in follow_up and "IFA is 1st in the U14 League." in follow_up
+    assert "and U13?" in follow_up
+    fresh = _texts(model.requests[-1])
+    assert "and U13?" in fresh and "IFA U14 standings?" not in fresh
+
+
+async def test_card_declares_the_conversation_extension() -> None:
+    from mt_agent.a2a_server import CONVERSATION_EXTENSION
+    from sb_support.specialists import CONVERSATION_EXTENSION as SUPPORT_SIDE
+
+    assert CONVERSATION_EXTENSION == SUPPORT_SIDE
+    async with served(scripted()) as http:
+        [mt] = await discover([BASE], http)
+    assert mt.conversational
