@@ -234,7 +234,7 @@ async def _qualifying(t: MtTruth) -> Truth:
         f"{row['points']} points from {row['played']} games. It includes {outside} matches "
         "against teams outside the table.",
         Meta(
-            facts=[str(row["points"]), str(row["played"])],
+            facts=[str(row["wins"]), str(row["losses"]), str(row["played"])],
             confidence="high",
             tools=["search_teams", "get_standings"],
         ),
@@ -271,6 +271,79 @@ async def _other_ages(t: MtTruth) -> Truth:
     return Truth(
         f"IFA has no U12 team in MT; it plays at {', '.join(ages)}.",
         Meta(facts=[ages[0]], confidence="low", tools=["search_teams"]),
+    )
+
+
+def _score(m: dict[str, Any]) -> str:
+    """A result as the team saw it: "W 2-1 vs Bayside FC (home)"."""
+    opponent = m["away_team"] if m["is_home"] else m["home_team"]
+    pens = ""
+    if m.get("home_penalty_score") is not None:
+        pens = f", {m['home_penalty_score']}-{m['away_penalty_score']} on penalties"
+    where = "home" if m["is_home"] else "away"
+    return (
+        f"{m['match_date']}: {m['result']} {m['goals_for']}-{m['goals_against']} vs "
+        f"{opponent['name']} ({where}{pens}, {m['competition']})"
+    )
+
+
+async def _last_result(t: MtTruth) -> Truth:
+    team_id, age_id = await t.team("IFA", "U15")
+    recent = await t.call("get_recent_results", team_id=team_id, age_group_id=age_id, limit=1)
+    if not recent.get("matches"):
+        raise TruthError(f"IFA U15 has no played match: {recent.get('error')}")
+    m = recent["matches"][0]
+    opponent = m["away_team"] if m["is_home"] else m["home_team"]
+    return Truth(
+        f"IFA U15's last game: {_score(m)}.",
+        Meta(
+            facts=[opponent["name"], str(m["goals_for"]), str(m["goals_against"])],
+            confidence="high",
+            tools=["search_teams", "get_recent_results"],
+        ),
+    )
+
+
+async def _form(t: MtTruth) -> Truth:
+    team_id, age_id = await t.team("IFA", "U15")
+    recent = await t.call("get_recent_results", team_id=team_id, age_group_id=age_id, limit=5)
+    matches, summary = recent.get("matches") or [], recent.get("summary") or {}
+    if len(matches) < 5:
+        raise TruthError(f"IFA U15 has {len(matches)} played matches, need 5")
+    return Truth(
+        f"IFA U15's last 5: {summary['wins']}W {summary['draws']}D {summary['losses']}L, "
+        f"goals {summary['goals_for']}-{summary['goals_against']}. "
+        + "; ".join(_score(m) for m in matches),
+        Meta(
+            facts=[str(summary["wins"]), str(summary["losses"])],
+            confidence="high",
+            tools=["search_teams", "get_recent_results"],
+        ),
+    )
+
+
+async def _head_to_head(t: MtTruth) -> Truth:
+    team_id, age_id = await t.team("IFA", "U15")
+    opponent_id, _ = await t.team("FC Westchester", "U15")
+    h2h = await t.call(
+        "get_recent_results",
+        team_id=team_id,
+        age_group_id=age_id,
+        opponent_id=opponent_id,
+        limit=20,
+    )
+    matches, summary = h2h.get("matches") or [], h2h.get("summary") or {}
+    if not matches:
+        raise TruthError("IFA U15 and FC Westchester U15 have no played match")
+    return Truth(
+        f"IFA U15 vs FC Westchester: {summary['wins']}W {summary['draws']}D "
+        f"{summary['losses']}L in {summary['played']} games. "
+        + "; ".join(_score(m) for m in matches),
+        Meta(
+            facts=[str(matches[0]["goals_for"]), str(matches[0]["goals_against"])],
+            confidence="high",
+            tools=["search_teams", "get_recent_results"],
+        ),
     )
 
 
@@ -326,6 +399,9 @@ SPECS: list[Spec] = [
     Spec("ambiguous-team", "How is Metropolitan Oval doing in the standings?", _ambiguous_team),
     Spec("unknown-team", "What are the standings for Zxqv Rovers?", _unknown_team),
     Spec("other-ages", "What are the standings for IFA U12?", _other_ages),
+    Spec("last-result", "How did IFA U15 do in their last game?", _last_result),
+    Spec("recent-form", "What's IFA U15's record over their last 5 games?", _form),
+    Spec("head-to-head", "How has IFA U15 done against FC Westchester?", _head_to_head),
     Spec(
         "follow-up",
         "And their U14 team?",

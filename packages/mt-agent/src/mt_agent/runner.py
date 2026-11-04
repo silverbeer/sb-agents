@@ -70,8 +70,10 @@ class ToolLedger:
     Confidence is "high" only when at least one tool ran and each tool's **latest**
     result is clean. Latest, not any: the instructions tell the model to re-call
     get_standings with a picked option after "ambiguous", and a search that missed then
-    hit is fine. A gap or error the model ended on (asked to clarify, or said the data
-    is unavailable) is "low"; so is an answer that used no tool at all, since every
+    hit is fine. A gap is also resolved by a later clean result from a *different* tool
+    (the model found an id and used it: SB-1526's head-to-head eval); an error is not.
+    A gap or error the model ended on (asked to clarify, or said the data is
+    unavailable) is "low"; so is an answer that used no tool at all, since every
     question routed here is a data question.
     """
 
@@ -84,7 +86,15 @@ class ToolLedger:
                 self.calls.append(part.function_call.name)
             if part.function_response and part.function_response.name:
                 name = part.function_response.name
-                self.latest[name] = tool_outcome(part.function_response.response)
+                outcome = tool_outcome(part.function_response.response)
+                if outcome == "ok":
+                    # A gap the model moved past: a clean result from another tool means
+                    # it found an id to use (e.g. an "ambiguous" search whose candidates
+                    # were one team at several ages). Errors stay: they're not resolved.
+                    for tool, seen in list(self.latest.items()):
+                        if tool != name and seen in GAPS:
+                            del self.latest[tool]
+                self.latest[name] = outcome
 
     @property
     def confidence(self) -> Confidence:

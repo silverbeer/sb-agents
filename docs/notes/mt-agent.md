@@ -7,8 +7,9 @@ mt-mcp's tools. Versions: google-adk 2.13.0, a2a-sdk 1.3.0, fasta2a 2.1.1, mcp 2
 ```
 Slack ─► sb-support core ── ask_mt_agent ──A2A 1.0──► mt-agent (ADK LlmAgent, Haiku)
                                                         └─ McpToolset ──MCP──► mt-mcp
-                                                             search_teams, get_upcoming_matches,
-                                                             get_standings
+                                                             search_teams, list_divisions,
+                                                             get_upcoming_matches,
+                                                             get_recent_results, get_standings
 ```
 
 ## Layout
@@ -52,6 +53,12 @@ a2a-sdk 1.x carries data parts as protobuf `Value`s, so numbers arrive as floats
 - **high** when at least one tool ran and every tool's **latest** result is clean;
 - **low** when a tool's latest result is a gap (`status` `ambiguous` / `not_found`) or has
   an `error` (any kind, including an MCP `isError`), or when no tool ran.
+
+A gap is also resolved by a later clean result from a **different** tool: the model
+found an id and used it. The head-to-head eval caught this (SB-1526): "FC Westchester"
+without an age is `ambiguous`, but every candidate is the same `team_id`, and the model
+went on to read results with it; the old rule still said `low`. Errors are never
+resolved that way.
 
 *Latest*, not *any*: the instructions tell the model to re-call get_standings with a picked
 option after `ambiguous`, and a search that missed and then hit is fine. Ending on a gap
@@ -206,6 +213,17 @@ sb-support ── contextId = uuid5("sb-support/<channel:thread>/mt-agent") ─�
 The eval's `follow-up` case runs "Where are IFA U15 in the league standings?" then
 "And their U14 team?" in one session and grades only the second reply.
 
+## Recent results and head-to-head (SB-1526)
+
+mt-mcp's `get_recent_results` (missing-table PR #726) returns a team's last played
+matches scored from its side (W/D/L, goals for/against, shootout alongside a draw) and a
+`summary`; `opponent_id` narrows it to head-to-head. mt-agent lists it in `TOOLS` and its
+instructions: give scores from the team's side, resolve the opponent with `search_teams`
+first, and treat `matches: []` as "none played", not "unavailable". The eval gained
+`last-result`, `recent-form` and `head-to-head`, with truth from the same tool. First
+run 12/14: one fact choice too strict (qualifying asks for a record, not points), and
+the confidence-rule gap below. After the fix: 14/14 twice, ~$0.022 agent + $0.045 judge.
+
 ## Evals: ground truth read live (SB-1493)
 
 ```bash
@@ -245,7 +263,7 @@ judge and `EvalRecord` as docs-agent, so the two compare) and borrows ADK's
 
 | Model | Runs | Passed | Agent $ / eval | Judge $ | Avg per case | Notes |
 |---|---|---|---|---|---|---|
-| claude-haiku-5-5 | 2 | **10/10, 10/10** (11/11 with `follow-up`, SB-1525) | $0.012 (~$0.0012/question) | $0.03 | 3.3 s | default |
+| claude-haiku-5-5 | 2 | **10/10, 10/10** (11/11 with `follow-up`, SB-1525; 14/14 x2 with results cases, SB-1526) | $0.012 (~$0.0012/question) | $0.03 | 3.3 s | default |
 | claude-sonnet-5-5 | 1 | 9/10 | $0.19 (~16x Haiku) | $0.03 | 4.1 s | `flex-table` hit the $0.02 per-run cost cap |
 
 Two things the eval caught while being built, both fixed:
