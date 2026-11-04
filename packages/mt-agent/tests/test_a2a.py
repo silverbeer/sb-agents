@@ -51,8 +51,8 @@ async def test_agent_card_has_name_skills_and_examples() -> None:
         card = (await http.get("/.well-known/agent-card.json")).json()
     assert card["name"] == "mt-agent"
     assert card["supportedInterfaces"][0]["url"] == BASE
-    [skill] = card["skills"]
-    assert skill["id"] == "mt-data"
+    skill, preview = card["skills"]
+    assert (skill["id"], preview["id"]) == ("mt-data", "match-preview")
     assert 3 <= len(skill["examples"]) <= 5
 
 
@@ -73,6 +73,7 @@ async def test_clean_answer_has_text_and_high_confidence_data_part() -> None:
         "get_recent_results",
         "get_standings",
         "get_upcoming_matches",
+        "match_preview",  # the preview Workflow, as an ordinary function tool
         "search_teams",
     ]
     # The model saw the tool's own result, not the MCP envelope.

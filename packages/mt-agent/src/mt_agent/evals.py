@@ -38,15 +38,14 @@ from google.adk.evaluation.eval_case import IntermediateData, Invocation
 from google.adk.evaluation.eval_metrics import EvalMetric, ToolTrajectoryCriterion
 from google.adk.evaluation.trajectory_evaluator import TrajectoryEvaluator
 from google.genai import types
-from mcp import ClientSession
-from mcp.client.streamable_http import create_mcp_http_client, streamable_http_client
 from pydantic_ai.models import Model
 from pydantic_evals import Case, Dataset
 from pydantic_evals.evaluators import Evaluator, EvaluatorContext, LLMJudge
 
-from mt_agent.agent import CLIENT_HEADER, DEFAULT_MCP_URL, build_agent, build_toolset
+from mt_agent.agent import build_agent, build_toolset
+from mt_agent.mt_client import McpCallError, MtClient, connect
 from mt_agent.runner import ToolLedger, TrackedRunner, is_answer
-from sb_obs import EvalRecord, emit_eval, price, setup_telemetry
+from sb_obs import EvalRecord, emit_eval, setup_telemetry
 from sb_obs.evals import PricedModel, summarize
 
 PASS_THRESHOLD = 0.8
@@ -64,17 +63,14 @@ class TruthError(RuntimeError):
 # --- ground truth: mt-mcp with no model in the loop ---------------------------------
 
 
-class MtTruth:
-    """Calls mt-mcp tools directly, as the same caller mt-agent is (token + X-MT-Client)."""
-
-    def __init__(self, session: ClientSession) -> None:
-        self.session = session
+class MtTruth(MtClient):
+    """mt-mcp with no model in the loop, plus the helpers the cases share."""
 
     async def call(self, tool: str, **args: Any) -> dict[str, Any]:
-        result = await self.session.call_tool(tool, args)
-        if result.is_error or not isinstance(result.structured_content, dict):
-            raise TruthError(f"{tool}({args}) failed: {result.content}")
-        return result.structured_content
+        try:
+            return await super().call(tool, **args)
+        except McpCallError as exc:
+            raise TruthError(str(exc)) from exc
 
     async def team(self, query: str, age_group: str) -> tuple[int, int]:
         """(team_id, age_group_id) for a team the case expects to resolve uniquely."""
@@ -94,18 +90,8 @@ class MtTruth:
 
 @asynccontextmanager
 async def mt_truth(url: str | None = None, token: str | None = None) -> AsyncIterator[MtTruth]:
-    token = token if token is not None else os.environ.get("MT_AGENT_MCP_TOKEN", "")
-    headers = {"X-MT-Client": CLIENT_HEADER}
-    if token:
-        headers["Authorization"] = f"Bearer {token}"
-    url = url or os.environ.get("MT_MCP_URL", DEFAULT_MCP_URL)
-    async with (
-        create_mcp_http_client(headers=headers) as http,
-        streamable_http_client(url, http_client=http) as (read, write, *_),
-        ClientSession(read, write) as session,
-    ):
-        await session.initialize()
-        yield MtTruth(session)
+    async with connect(url, token) as client:
+        yield MtTruth(client.session)
 
 
 # --- cases --------------------------------------------------------------------------
@@ -347,6 +333,29 @@ async def _head_to_head(t: MtTruth) -> Truth:
     )
 
 
+async def _preview(t: MtTruth) -> Truth:
+    team_id, age_id = await t.team("IFA", "U15")
+    upcoming = await t.call("get_upcoming_matches", team_id=team_id, age_group_id=age_id, limit=1)
+    if not upcoming["matches"]:
+        raise TruthError("IFA U15 has no upcoming match to preview")
+    m = upcoming["matches"][0]
+    opponent = m["away_team"] if m["is_home"] else m["home_team"]
+    form = await t.call("get_recent_results", team_id=team_id, age_group_id=age_id, limit=5)
+    opp_form = await t.call(
+        "get_recent_results", team_id=opponent["id"], age_group_id=age_id, limit=5
+    )
+    s, o = form.get("summary") or {}, opp_form.get("summary") or {}
+    where = "home" if m["is_home"] else "away"
+    return Truth(
+        f"Preview: {m['match_date']} ({m['kickoff']}), IFA U15 {where} vs {opponent['name']} "
+        f"({m['competition']}). IFA last 5: {s.get('wins')}W {s.get('draws')}D "
+        f"{s.get('losses')}L. {opponent['name']} last 5: {o.get('wins')}W {o.get('draws')}D "
+        f"{o.get('losses')}L. Any table position and head-to-head given must match MT. "
+        "No prediction of the result.",
+        Meta(facts=[opponent["name"]], confidence="high", tools=["search_teams"]),
+    )
+
+
 async def _follow_up(t: MtTruth) -> Truth:
     # Turn 1 asked about IFA U15; "their U14 team" only resolves from that context.
     team_id, age_id = await t.team("IFA", "U14")
@@ -402,6 +411,7 @@ SPECS: list[Spec] = [
     Spec("last-result", "How did IFA U15 do in their last game?", _last_result),
     Spec("recent-form", "What's IFA U15's record over their last 5 games?", _form),
     Spec("head-to-head", "How has IFA U15 done against FC Westchester?", _head_to_head),
+    Spec("match-preview", "Preview IFA U15's next game.", _preview),
     Spec(
         "follow-up",
         "And their U14 team?",
@@ -453,7 +463,8 @@ class Answer:
 async def ask(runner: TrackedRunner, turns: Turns) -> Answer:
     """Each turn through the real runner (caps, RunRecord) in one session, as A2A runs a
     conversation with a reused contextId. The answer, confidence and tools are the last
-    turn's; cost covers every turn."""
+    turn's; cost is the RunRecords' (so it includes the preview workflow's writer).
+    Give each case its own runner: `last_usage` is per runner."""
     session = await runner.session_service.create_session(app_name=runner.app_name, user_id="eval")
     cost: float | None = None
     for question in turns:
@@ -463,16 +474,11 @@ async def ask(runner: TrackedRunner, turns: Turns) -> Answer:
             user_id="eval", session_id=session.id, new_message=message
         ):
             ledger.see(event)
-            if (u := event.usage_metadata) is not None and event.author == runner.agent.name:
-                c = price(
-                    runner.model,
-                    input_tokens=u.prompt_token_count or 0,
-                    output_tokens=(u.candidates_token_count or 0) + (u.thoughts_token_count or 0),
-                    cache_read_tokens=u.cached_content_token_count or 0,
-                )
-                cost = None if c is None else (cost or 0.0) + c
             if is_answer(event, runner.agent.name):
                 text = "\n".join(p.text for p in event.content.parts if p.text)
+        turn_cost = runner.last_usage.get("cost_usd")
+        if turn_cost is not None:
+            cost = (cost or 0.0) + turn_cost
     return Answer(text, ledger.confidence, ledger.calls, cost)
 
 
@@ -567,7 +573,9 @@ def build_dataset(
 # --- run ------------------------------------------------------------------------------
 
 
-async def run_evals(only: list[str] | None = None, verbose: bool = False) -> float:
+async def run_evals(
+    only: list[str] | None = None, verbose: bool = False, preview: bool = True
+) -> float:
     specs = [s for s in SPECS if not only or s.name in only]
     broken: TruthError | None = None
     async with mt_truth() as truth:
@@ -578,12 +586,13 @@ async def run_evals(only: list[str] | None = None, verbose: bool = False) -> flo
     if broken is not None:  # raised outside the MCP task group, so not an ExceptionGroup
         raise broken
     toolset = build_toolset()
-    runner = TrackedRunner(build_agent(toolset=toolset), caller="eval")
+    agent = build_agent(toolset=toolset, preview=preview)
+    model = TrackedRunner(agent).model
     judge = PricedModel(JUDGE_MODEL)
     agent_cost: list[float] = []
 
     async def answer(turns: Turns) -> Answer:
-        out = await ask(runner, turns)
+        out = await ask(TrackedRunner(agent, caller="eval"), turns)
         if out.cost_usd is not None:
             agent_cost.append(out.cost_usd)
         return out
@@ -601,7 +610,7 @@ async def run_evals(only: list[str] | None = None, verbose: bool = False) -> flo
     rate = passed / total if total else 0.0
     record = EvalRecord(
         suite=SUITE,
-        model=runner.model,
+        model=model,
         judge_model=judge.model_name,
         cases=total,
         passed=passed,
@@ -626,12 +635,17 @@ def main() -> None:
     parser.add_argument("--model", help="agent model (default: $MT_AGENT_MODEL or registry)")
     parser.add_argument("--case", action="append", help="run only this case (repeatable)")
     parser.add_argument("-v", "--verbose", action="store_true", help="print answers")
+    parser.add_argument(
+        "--no-preview",
+        action="store_true",
+        help="drop the match_preview workflow tool (single-agent baseline, SB-1527)",
+    )
     args = parser.parse_args()
     if args.model:
         os.environ["MT_AGENT_MODEL"] = args.model
     setup_telemetry("mt-agent")
     try:
-        rate = asyncio.run(run_evals(args.case, args.verbose))
+        rate = asyncio.run(run_evals(args.case, args.verbose, not args.no_preview))
     except TruthError as exc:
         raise SystemExit(f"broken eval (MT data changed): {exc}") from exc
     sys.exit(0 if rate >= PASS_THRESHOLD else 1)

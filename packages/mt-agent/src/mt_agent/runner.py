@@ -18,6 +18,7 @@ call covers each request exactly once, whatever the transport:
 from __future__ import annotations
 
 import json
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
@@ -46,6 +47,11 @@ MAX_COST_USD = 0.02
 
 Confidence = Literal["high", "low"]
 GAPS = ("ambiguous", "not_found")
+
+
+# The request's RunHandle, for usage from nested runs (the match preview workflow's writer)
+# that never reach this runner's event stream.
+CURRENT_RUN: ContextVar[RunHandle | None] = ContextVar("mt_agent_current_run", default=None)
 
 
 class UsageLimitExceeded(RuntimeError):
@@ -160,6 +166,7 @@ class TrackedRunner(Runner):
         kwargs.setdefault("session_service", BoundedSessionService())
         super().__init__(app_name=agent.name, agent=agent, **kwargs)
         self.caller = caller
+        self.last_usage: dict[str, Any] = {}  # the last run's usage (one request at a time)
         self.max_llm_calls = max_llm_calls
         self.max_cost_usd = max_cost_usd
         llm = agent.model
@@ -170,6 +177,7 @@ class TrackedRunner(Runner):
         kwargs["run_config"] = config.model_copy(update={"max_llm_calls": self.max_llm_calls})
         ledger = ToolLedger()
         with track_run(AGENT, caller=self.caller, model=self.model) as run:
+            token = CURRENT_RUN.set(run)
             try:
                 async for event in super().run_async(**kwargs):
                     if event.author == self.agent.name:
@@ -186,4 +194,6 @@ class TrackedRunner(Runner):
             except LlmCallsLimitExceededError as exc:
                 raise UsageLimitExceeded(str(exc)) from exc
             finally:
+                CURRENT_RUN.reset(token)
                 run.add_usage(tool_calls=len(ledger.calls))
+                self.last_usage = dict(run.usage)

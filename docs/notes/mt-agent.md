@@ -19,6 +19,8 @@ Slack ─► sb-support core ── ask_mt_agent ──A2A 1.0──► mt-agent
 | `agent.py` | `LlmAgent` (Claude via `AnthropicLlm`), instructions, `McpToolset` with `tool_filter`, MCP result unwrapping |
 | `runner.py` | `TrackedRunner`: caps, the RunRecord, and the reply's data part |
 | `a2a_server.py` | agent card, `to_a2a(...)`, `main()` (uvicorn, `instrument_asgi`, `setup_telemetry`) |
+| `preview.py` | match preview as an ADK `Workflow`: parallel deterministic reads, one writer call |
+| `mt_client.py` | mt-mcp called directly (preview workflow, eval ground truth) |
 | `sessions.py` | `BoundedSessionService`: one ADK session per A2A context, bounded by count and idle time |
 | `evals.py` | `mt-agent-eval`: ground truth from mt-mcp at eval time, four checks, EvalRecord |
 
@@ -213,6 +215,57 @@ sb-support ── contextId = uuid5("sb-support/<channel:thread>/mt-agent") ─�
 The eval's `follow-up` case runs "Where are IFA U15 in the league standings?" then
 "And their U14 team?" in one session and grades only the second reply.
 
+## Match preview: an ADK Workflow (SB-1527)
+
+"Preview IFA U15's next game" needs five mt-mcp reads, and none of them needs the
+model's judgment once the team is known. So they run as a graph, and the model only writes:
+
+```
+START ─► fixture ─┬─► team_form ─────┐
+                  ├─► opponent_form ─┤
+                  ├─► table ─────────┼─► gather (JoinNode) ─► brief ─► preview_writer (LlmAgent)
+                  ├─► head_to_head ──┤
+                  └─► carry ─────────┘   (the fixture itself, so the writer sees date and venue)
+```
+
+- **`Workflow`, not `ParallelAgent`.** In ADK 2.13 `ParallelAgent` and `SequentialAgent`
+  are marked deprecated in favor of `google.adk.workflow.Workflow`, a graph of nodes.
+  `@node` turns an async function into a `FunctionNode` (deterministic, no model); a
+  tuple in an edge fans out; a `JoinNode` waits for every branch and outputs
+  `{branch_name: output}`; an `LlmAgent` as a node gets its predecessor's output as the
+  user message. Branches ran concurrently (checked in a spike before building on it).
+- **Exposed as a tool.** A Workflow can't be an LlmAgent sub-agent yet, so
+  `match_preview(team_id, age_group_id)` is a plain function tool that runs the workflow
+  in a nested `Runner(node=workflow)`. The main agent resolves the team as usual
+  (`search_teams`), calls it, and relays the preview.
+- **One RunRecord.** The nested runner's events never reach `TrackedRunner`, so the
+  tool adds the writer's usage to the request's run through a `ContextVar`
+  (`runner.CURRENT_RUN`). The eval caught the gap first: its agent cost priced only the
+  main runner's events.
+- **A failed read doesn't sink the preview.** Each read returns `{"error": ...}` on
+  failure and the writer is told to say that part is unavailable. No upcoming match →
+  `not_found`, and the branches skip their reads.
+
+### Workflow vs single agent (2026-11-04, `match-preview` case, Haiku, 3 runs each)
+
+`uv run mt-agent-eval --case match-preview [--no-preview]` (inside `op run`).
+`--no-preview` drops the tool, and the agent gathers the same data with its own calls.
+
+| | Workflow | Single agent |
+|---|---|---|
+| Passed | 3/3 | 3/3 |
+| Model requests | 4 (3 main + 1 writer) | 5 |
+| Tool calls the model makes | 2 (`search_teams`, `match_preview`) | 7 |
+| Input tokens | 14.3k | 29.8k |
+| Cost / question | **$0.0024** | $0.0038 |
+| Latency | ~12 s | ~12 s |
+
+Half the input tokens and 38% cheaper at the same quality: the single agent re-sends
+every tool result on each round trip, the workflow sends the data once to the writer.
+Latency is a wash: the reads run in parallel, but the main agent's relay adds a model
+call. Returning the preview without the relay (`skip_summarization`) would cut that;
+not done, because the final event would then carry no text part for the data part.
+
 ## Recent results and head-to-head (SB-1526)
 
 mt-mcp's `get_recent_results` (missing-table PR #726) returns a team's last played
@@ -263,7 +316,7 @@ judge and `EvalRecord` as docs-agent, so the two compare) and borrows ADK's
 
 | Model | Runs | Passed | Agent $ / eval | Judge $ | Avg per case | Notes |
 |---|---|---|---|---|---|---|
-| claude-haiku-5-5 | 2 | **10/10, 10/10** (11/11 with `follow-up`, SB-1525; 14/14 x2 with results cases, SB-1526) | $0.012 (~$0.0012/question) | $0.03 | 3.3 s | default |
+| claude-haiku-5-5 | 2 | **10/10, 10/10** (11/11 with `follow-up`, SB-1525; 14/14 x2 with results cases, SB-1526; 15/15 with `match-preview`, SB-1527) | $0.012 (~$0.0012/question) | $0.03 | 3.3 s | default |
 | claude-sonnet-5-5 | 1 | 9/10 | $0.19 (~16x Haiku) | $0.03 | 4.1 s | `flex-table` hit the $0.02 per-run cost cap |
 
 Two things the eval caught while being built, both fixed:
