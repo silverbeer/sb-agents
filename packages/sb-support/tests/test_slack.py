@@ -139,3 +139,76 @@ async def test_docs_client_unreachable_raises_docs_agent_error() -> None:
     async with httpx.AsyncClient(transport=httpx.MockTransport(refuse)) as http:
         with pytest.raises(SpecialistError, match="unreachable"):
             await SpecialistClient("http://127.0.0.1:8101", http).ask("q")
+
+
+# --- tables (SB-1528) ----------------------------------------------------------------
+
+
+def _reply_with_table(text: str = "IFA are 10th.", **kw):
+    from sb_support.core import Reply
+    from sb_support.tables import Table
+
+    table = Table(
+        "Homegrown Northeast U15 (League)",
+        ["#", "Team", "Pts"],
+        [["1", "Metropolitan Oval", "22"], ["10", "IFA", "6"]],
+    )
+    return Reply(text, tables=[table], **kw)
+
+
+async def test_a_table_is_posted_as_a_block_kit_table() -> None:
+    from sb_support.slack import post_reply
+
+    client = fake_client()
+    await post_reply(client, "C1", "111.1", _reply_with_table())
+
+    kwargs = client.chat_postMessage.await_args.kwargs
+    assert kwargs["text"] == "IFA are 10th."  # notification / accessibility fallback
+    section, context, table = kwargs["blocks"]
+    assert section["text"]["text"] == "IFA are 10th."
+    assert "Homegrown Northeast U15" in context["elements"][0]["text"]
+    assert table["type"] == "table"
+    assert [c["text"] for c in table["rows"][0]] == ["#", "Team", "Pts"]  # header row
+    assert [c["text"] for c in table["rows"][2]] == ["10", "IFA", "6"]
+    assert table["column_settings"] == [{"align": "right"}, None, {"align": "right"}]
+
+
+async def test_rejected_blocks_fall_back_to_a_code_block() -> None:
+    from sb_support.slack import post_reply
+
+    client = fake_client()
+    client.chat_postMessage = AsyncMock(side_effect=[RuntimeError("invalid_blocks"), None])
+    await post_reply(client, "C1", "111.1", _reply_with_table())
+
+    retry = client.chat_postMessage.await_args_list[1].kwargs
+    assert "blocks" not in retry
+    assert retry["text"].startswith("IFA are 10th.")
+    assert "```" in retry["text"] and "Metropolitan Oval  22" in retry["text"]
+
+
+async def test_too_long_text_skips_blocks_and_uses_a_code_block() -> None:
+    from sb_support.slack import post_reply
+
+    client = fake_client()
+    await post_reply(client, "C1", "111.1", _reply_with_table("x" * 3001))
+
+    kwargs = client.chat_postMessage.await_args.kwargs
+    assert "blocks" not in kwargs and "```" in kwargs["text"]
+
+
+async def test_a_reply_without_tables_is_plain_text() -> None:
+    from sb_support.core import Reply
+    from sb_support.slack import post_reply
+
+    client = fake_client()
+    await post_reply(client, "C1", "111.1", Reply("hi"))
+    client.chat_postMessage.assert_awaited_once_with(channel="C1", thread_ts="111.1", text="hi")
+
+
+def test_a_table_over_slacks_limits_is_not_a_block() -> None:
+    from sb_support.slack import table_block
+    from sb_support.tables import Table
+
+    assert table_block(Table("t", ["a"], [["x"]] * 100)) is None  # 101 rows with the header
+    assert table_block(Table("t", ["a"] * 21, [["x"] * 21])) is None
+    assert table_block(Table("t", ["a"], [["x" * 10_001]])) is None

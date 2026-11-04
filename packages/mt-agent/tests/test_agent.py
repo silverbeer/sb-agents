@@ -72,6 +72,7 @@ def test_clean_tool_results_are_high_confidence() -> None:
         "sources": ["search_teams", "get_standings"],
         "tool_calls": 2,
         "issues": [],
+        "tables": [],  # get_standings returned no rows
     }
 
 

@@ -35,6 +35,7 @@ from google.adk.runners import Runner
 from google.genai import types
 
 from mt_agent.sessions import BoundedSessionService
+from mt_agent.tables import tables_from
 from sb_obs import RunHandle, price, track_run
 
 AGENT = "mt-agent"
@@ -85,6 +86,7 @@ class ToolLedger:
 
     calls: list[str] = field(default_factory=list)
     latest: dict[str, str] = field(default_factory=dict)
+    results: dict[str, Any] = field(default_factory=dict)  # latest result per tool, last run last
 
     def see(self, event: Event) -> None:
         for part in (event.content.parts if event.content else None) or []:
@@ -93,6 +95,8 @@ class ToolLedger:
             if part.function_response and part.function_response.name:
                 name = part.function_response.name
                 outcome = tool_outcome(part.function_response.response)
+                self.results.pop(name, None)
+                self.results[name] = part.function_response.response
                 if outcome == "ok":
                     # A gap the model moved past: a clean result from another tool means
                     # it found an id to use (e.g. an "ambiguous" search whose candidates
@@ -113,6 +117,7 @@ class ToolLedger:
             "sources": list(dict.fromkeys(self.calls)),
             "tool_calls": len(self.calls),
             "issues": [f"{t}: {o}" for t, o in self.latest.items() if o != "ok"],
+            "tables": tables_from(self.results),
         }
 
 

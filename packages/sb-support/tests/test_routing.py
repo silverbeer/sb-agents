@@ -264,3 +264,38 @@ def test_card_extension_marks_a_specialist_conversational() -> None:
     assert specialist_from_card({"name": "a", **ext}, BASE, None).conversational
     assert not specialist_from_card({"name": "b", "capabilities": {}}, BASE, None).conversational
     assert not specialist_from_card({"name": "c"}, BASE, None).conversational
+
+
+# --- tables from the data part (SB-1528) -------------------------------------------------
+
+
+def test_parse_tables_keeps_well_formed_ones_and_cleans_floats() -> None:
+    from sb_support.tables import parse_tables
+
+    data = {
+        "tables": [
+            {"title": "t", "columns": ["#", "Pts"], "rows": [[1.0, 22.0], ["2", "18"]]},
+            {"title": "ragged", "columns": ["a", "b"], "rows": [["only one"]]},
+            {"title": "no columns", "columns": [], "rows": []},
+            "not a table",
+        ]
+    }
+    [table] = parse_tables(data)
+    assert table.rows == [["1", "22"], ["2", "18"]]
+    assert parse_tables(None) == [] and parse_tables({"tables": "x"}) == []
+
+
+async def test_reply_carries_the_specialists_tables(emitted: list) -> None:
+    @dataclass
+    class TableClient(StubClient):
+        async def ask(self, question: str, context_id: str | None = None) -> SpecialistAnswer:
+            data = {
+                "confidence": "high",
+                "tables": [{"title": "T", "columns": ["a"], "rows": [["1"]]}],
+            }
+            return SpecialistAnswer("answer", "high", data)
+
+    mt = Specialist("mt-agent", "MT data.", TableClient())
+    agent = build_agent(TestModel(call_tools=["ask_mt_agent"]), [mt])
+    reply = await answer(agent, "IFA standings?")
+    assert [t.title for t in reply.tables] == ["T"]

@@ -13,6 +13,7 @@ from pydantic_ai.usage import UsageLimits
 from sb_models import resolve
 
 from sb_support.specialists import Specialist, SpecialistError
+from sb_support.tables import Table, parse_tables
 
 log = logging.getLogger("sb_support.routing")
 
@@ -43,6 +44,7 @@ class SpecialistCall:
     question: str
     confidence: str | None = None
     error: str | None = None
+    tables: list[Table] = field(default_factory=list)
 
 
 @dataclass
@@ -55,6 +57,14 @@ class SupportDeps:
     @property
     def routed_to(self) -> list[str]:
         return list(dict.fromkeys(c.specialist for c in self.calls))
+
+    @property
+    def tables(self) -> list[Table]:
+        """The latest successful call's tables: the data the reply is about."""
+        for call in reversed(self.calls):
+            if call.tables and not call.error:
+                return call.tables
+        return []
 
     @property
     def escalation_reason(self) -> str | None:
@@ -89,6 +99,7 @@ def specialist_tool(specialist: Specialist) -> Tool[SupportDeps]:
             )
             return f"{specialist.name} is unavailable right now ({exc})."
         call.confidence = answer.confidence
+        call.tables = parse_tables(answer.data)
         return answer.text
 
     return Tool(

@@ -188,3 +188,40 @@ async def test_card_declares_the_conversation_extension() -> None:
     async with served(scripted()) as http:
         [mt] = await discover([BASE], http)
     assert mt.conversational
+
+
+# --- typed tables over A2A (SB-1528) ---------------------------------------------------
+
+
+async def test_standings_table_survives_the_a2a_data_part() -> None:
+    from sb_support.tables import parse_tables
+
+    full = {
+        "team_id": 102,
+        "competition": "League",
+        "age_group": {"id": 14, "name": "U14"},
+        "division": {"id": 1, "name": "Northeast", "league": "Homegrown"},
+        "rows": [
+            {
+                "position": 1,
+                "team": {"id": 102, "name": "IFA"},
+                "played": 6,
+                "wins": 5,
+                "draws": 0,
+                "losses": 1,
+                "goal_difference": 9,
+                "points": 15,
+            },
+        ],
+        "coverage": {"matches_counted": 18, "fixtures": 42},
+        "options": [],
+        "error": None,
+    }
+    stub = StubMcp(get_standings=full)
+    model = standings_script(says("IFA is 1st."))
+    async with served(model, stub) as http:
+        answer = await SpecialistClient(BASE, http).ask("IFA U14 standings?")
+
+    [table] = parse_tables(answer.data)
+    assert table.title.startswith("Homegrown Northeast U14 (League)")
+    assert table.rows == [["1", "IFA", "6", "5", "0", "1", "+9", "15"]]
