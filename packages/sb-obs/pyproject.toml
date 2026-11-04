@@ -15,6 +15,9 @@ dependencies = [
     "opentelemetry-instrumentation-logging>=0.65b0",
 ]
 
+[project.optional-dependencies]
+evals = ["pydantic-ai-slim>=2.64", "pydantic-evals>=2.64"]  # sb_obs.evals
+
 [tool.uv.sources]
 sb-models = { workspace = true }
 

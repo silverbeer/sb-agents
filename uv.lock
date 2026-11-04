@@ -591,7 +591,7 @@ dependencies = [
     { name = "pydantic-ai-slim", extra = ["anthropic", "openai"] },
     { name = "pydantic-evals" },
     { name = "sb-models" },
-    { name = "sb-obs" },
+    { name = "sb-obs", extra = ["evals"] },
     { name = "uvicorn" },
 ]
 
@@ -601,7 +601,7 @@ requires-dist = [
     { name = "pydantic-ai-slim", extras = ["anthropic", "openai"], specifier = ">=2.64" },
     { name = "pydantic-evals", specifier = ">=2.64" },
     { name = "sb-models", editable = "packages/sb-models" },
-    { name = "sb-obs", editable = "packages/sb-obs" },
+    { name = "sb-obs", extras = ["evals"], editable = "packages/sb-obs" },
     { name = "uvicorn", specifier = ">=0.30" },
 ]
 
@@ -1163,8 +1163,11 @@ source = { editable = "packages/mt-agent" }
 dependencies = [
     { name = "anthropic" },
     { name = "google-adk", extra = ["a2a", "mcp"] },
+    { name = "mcp" },
+    { name = "pydantic-ai-slim", extra = ["anthropic"] },
+    { name = "pydantic-evals" },
     { name = "sb-models" },
-    { name = "sb-obs" },
+    { name = "sb-obs", extra = ["evals"] },
     { name = "uvicorn" },
 ]
 
@@ -1172,8 +1175,11 @@ dependencies = [
 requires-dist = [
     { name = "anthropic", specifier = ">=0.78" },
     { name = "google-adk", extras = ["a2a", "mcp"], specifier = ">=2.13" },
+    { name = "mcp", specifier = ">=2.3" },
+    { name = "pydantic-ai-slim", extras = ["anthropic"], specifier = ">=2.64" },
+    { name = "pydantic-evals", specifier = ">=2.64" },
     { name = "sb-models", editable = "packages/sb-models" },
-    { name = "sb-obs", editable = "packages/sb-obs" },
+    { name = "sb-obs", extras = ["evals"], editable = "packages/sb-obs" },
     { name = "uvicorn", specifier = ">=0.30" },
 ]
 
@@ -2194,6 +2200,12 @@ dependencies = [
     { name = "sb-models" },
 ]
 
+[package.optional-dependencies]
+evals = [
+    { name = "pydantic-ai-slim" },
+    { name = "pydantic-evals" },
+]
+
 [package.metadata]
 requires-dist = [
     { name = "genai-prices", specifier = ">=0.2" },
@@ -2204,8 +2216,11 @@ requires-dist = [
     { name = "opentelemetry-instrumentation-logging", specifier = ">=0.65b0" },
     { name = "opentelemetry-sdk", specifier = ">=1.44" },
     { name = "pydantic", specifier = ">=2.10" },
+    { name = "pydantic-ai-slim", marker = "extra == 'evals'", specifier = ">=2.64" },
+    { name = "pydantic-evals", marker = "extra == 'evals'", specifier = ">=2.64" },
     { name = "sb-models", editable = "packages/sb-models" },
 ]
+provides-extras = ["evals"]
 
 [[package]]
 name = "sb-support"

@@ -18,6 +18,7 @@ Slack ─► sb-support core ── ask_mt_agent ──A2A 1.0──► mt-agent
 | `agent.py` | `LlmAgent` (Claude via `AnthropicLlm`), instructions, `McpToolset` with `tool_filter`, MCP result unwrapping |
 | `runner.py` | `TrackedRunner`: caps, the RunRecord, and the reply's data part |
 | `a2a_server.py` | agent card, `to_a2a(...)`, `main()` (uvicorn, `instrument_asgi`, `setup_telemetry`) |
+| `evals.py` | `mt-agent-eval`: ground truth from mt-mcp at eval time, four checks, EvalRecord |
 
 `to_a2a` attaches its routes in the app's **lifespan**, so a client in the same process
 (tests) must enter `app.router.lifespan_context(app)` first, or every path is a 404.
@@ -166,6 +167,62 @@ toolset per request with that token through `McpToolset(header_provider=...)`. T
 public identity until a Slack ↔ MT account link exists. Also open: auth between agents
 (SB-1480).
 
+## Evals: ground truth read live (SB-1493)
+
+```bash
+make mt-eval                                  # ~$0.04 (Haiku agent + Sonnet judge), ~20 s
+uv run mt-agent-eval --case flex-table -v     # one case, print the answer (inside op run)
+```
+
+MT's data moves every weekend, so an expected answer written down today is wrong by
+Monday. Each case is a question plus a `truth` function that calls mt-mcp **directly,
+with no model in the loop** (same token and `X-MT-Client` as the agent), and builds the
+expected answer from what comes back. The eval measures whether the agent reads and
+reports MT's data correctly, not whether MT's data is right.
+
+Four checks per case; a case passes when every check that applies passes:
+
+| Check | Kind | What |
+|---|---|---|
+| FactsMentioned | deterministic | key facts from the truth (position, points, opponent) appear in the answer; a number must stand alone (`10` matches "10th", not "110") |
+| ConfidenceMatches | deterministic | the data part's confidence: `high` for clean lookups, `low` when the agent should ask or found nothing |
+| ToolPath | ADK `TrajectoryEvaluator` | expected tools ran in order (`IN_ORDER`, args ignored); retries and extra calls are fine |
+| LLMJudge | Sonnet 5.5 | agrees with the truth; asks instead of guessing when it should |
+
+**When a premise breaks, the run stops before any model call.** Each truth function
+checks its premise ("Metropolitan Oval is ambiguous", "Zxqv Rovers is not found", "the
+table has rows") and raises `TruthError`; all broken cases are reported together. That
+fired on the first run: the U14 Academy New England table had no games played yet, so
+"who's top" had no answer. The case moved to U15 Homegrown Northeast.
+
+**ADK eval vs pydantic-evals.** ADK 2.13 ships an eval framework
+(`google.adk.evaluation`): eval sets of fixed conversations with expected responses and
+tool trajectories, scored by metrics such as `tool_trajectory_avg_score`. Fixed expected
+responses don't fit live data, so the suite runs on pydantic-evals (the same harness,
+judge and `EvalRecord` as docs-agent, so the two compare) and borrows ADK's
+`TrajectoryEvaluator` for the tool-path check by building one `Invocation` per answer.
+
+### Results (2026-11-04, 10 cases)
+
+| Model | Runs | Passed | Agent $ / eval | Judge $ | Avg per case | Notes |
+|---|---|---|---|---|---|---|
+| claude-haiku-5-5 | 2 | **10/10, 10/10** | $0.012 (~$0.0012/question) | $0.03 | 3.3 s | default |
+| claude-sonnet-5-5 | 1 | 9/10 | $0.19 (~16x Haiku) | $0.03 | 4.1 s | `flex-table` hit the $0.02 per-run cost cap |
+
+Two things the eval caught while being built, both fixed:
+
+- **An ambiguous coverage string.** mt-mcp's qualifying coverage reads "79 played of 258
+  scheduled; 5 against 1 teams outside this table", and the agent sometimes reported
+  "1 team" as the count of outside matches (judge failed 1 of 2 runs). The instructions
+  now point at the structured fields (`matches_vs_outside_table`, `teams_outside_table`).
+  Worth fixing at the source in mt-mcp's wording too.
+- **An underspecified case.** "Will FC Westchester make the playoffs?" fairly reads as the
+  League table or the qualifying record; the truth now carries both, and the case checks
+  only that the answer doesn't call qualification.
+
+mt-agent stays Claude-only (ADK + LiteLLM conflict, SB-1490), so the second model is
+Sonnet, not a second provider. SB-1520 moves the model choice to the resolver.
+
 ## Run it
 
 ```bash
@@ -176,5 +233,4 @@ SB_SUPPORT_SPECIALISTS=http://127.0.0.1:8101,http://127.0.0.1:8102 make support
 
 Then in Slack: `@sb-agent what are the standings for IFA U14?`
 
-Not yet done: a live run against prod mt-mcp (needs the 1Password item), evals for
-mt-agent, and an end-to-end Slack check.
+Deployed in k3s since SB-1481 (docs/notes/deploy-k3s.md).
