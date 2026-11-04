@@ -14,7 +14,7 @@ from pydantic_evals.reporting import EvaluationReport
 
 from sb_obs.runs import price
 
-__all__ = ["PricedModel", "summarize"]
+__all__ = ["PricedModel", "percentile", "summarize"]
 
 
 class PricedModel(WrapperModel):
@@ -51,3 +51,12 @@ def summarize(report: EvaluationReport) -> tuple[int, int, dict[str, float]]:
             results.setdefault(name, []).append(bool(assertion.value))
     scores = {name: sum(vals) / len(vals) for name, vals in sorted(results.items())}
     return passed, total, scores
+
+
+def percentile(values: list[float], q: float) -> float | None:
+    """Nearest-rank percentile (q in 0..100); None for no values."""
+    if not values:
+        return None
+    ordered = sorted(values)
+    rank = max(1, -(-len(ordered) * q // 100))  # ceil(n * q / 100), at least 1
+    return float(ordered[int(rank) - 1])
