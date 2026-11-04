@@ -237,6 +237,13 @@ class EvalRecord(BaseModel):
     agent_cost_usd: float | None = None
     judge_cost_usd: float | None = None
     duration_s: float = 0.0
+    # Budget per case (SB-1530): what answering cost in model requests and tool calls,
+    # over the cases that finished; `limit_failures` counts the ones that hit a cap.
+    requests_p50: float | None = None
+    requests_p95: float | None = None
+    tool_calls_p50: float | None = None
+    tool_calls_p95: float | None = None
+    limit_failures: int = 0
 
     @property
     def cost_usd(self) -> float | None:

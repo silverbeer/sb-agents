@@ -13,14 +13,16 @@ import os
 import time
 from dataclasses import dataclass, field
 
+from pydantic_ai.exceptions import UsageLimitExceeded
 from pydantic_ai.models import Model
 from pydantic_evals import Case, Dataset
+from pydantic_evals.dataset import increment_eval_metric
 from pydantic_evals.evaluators import Evaluator, EvaluatorContext, LLMJudge
 
-from docs_agent.agent import Deps, DocsAnswer, WithDeps, build_agent
+from docs_agent.agent import USAGE_LIMITS, Deps, DocsAnswer, WithDeps, build_agent
 from docs_agent.corpus import Corpus, KeywordRetriever, Retriever
 from sb_obs import EvalRecord, emit_eval, model_name
-from sb_obs.evals import PricedModel, summarize
+from sb_obs.evals import PricedModel, percentile, summarize
 
 PASS_THRESHOLD = 0.8
 JUDGE_MODEL = os.environ.get("DOCS_AGENT_JUDGE_MODEL", "anthropic:claude-sonnet-5-5")
@@ -146,6 +148,44 @@ CASES: list[Case[str, str, Meta]] = [
         expected_output="The docs do not cover this; there is no payments service on-call info.",
         metadata=Meta(answerable=False),
     ),
+    # Open-ended (SB-1530): broad questions where a model that searches wide runs into
+    # the request / tool-call caps. DeepSeek-v4.1-flash passed the 14 narrow cases but hit
+    # the 12-call cap live on the first two (SB-1490). Neither is in the corpus:
+    # sb-agents isn't indexed, so the right answer is "the docs don't cover it", found
+    # within budget.
+    Case(
+        name="open-sb-agents-k3s",
+        inputs="How do I deploy sb-agents to k3s?",
+        expected_output="The docs don't cover deploying sb-agents.",
+        metadata=Meta(answerable=False),
+    ),
+    Case(
+        name="open-mt-agent-auth",
+        inputs="How does mt-agent authenticate to MissingTable?",
+        expected_output="The docs don't describe how mt-agent authenticates.",
+        metadata=Meta(answerable=False),
+    ),
+    Case(
+        name="open-janitor-overview",
+        inputs="What can the janitor CLI do for my machine?",
+        expected_output=(
+            "`jt` does workstation and platform housekeeping: doctor (health summary), docker "
+            "(usage, prune), disk (usage, large files), brew (outdated, cleanup), logs (large "
+            "and stale), supabase (status, backups), secrets, and k3s (health, cleanup). "
+            "Destructive commands honour --dry-run and --yes."
+        ),
+        metadata=Meta(["janitor/README.md"]),
+    ),
+    Case(
+        name="open-mt-deploy-healthy",
+        inputs="After a missing-table production deploy, how do I check it's healthy?",
+        expected_output=(
+            "Check the health and version endpoints (missingtable.com/health, /api/version), "
+            "kubectl get deployments and pods in missing-table-prod, run "
+            "./scripts/health-check.sh prod, and check the version footer in the browser."
+        ),
+        metadata=Meta(["missing-table/docs/05-deployment/production-runbook.md"]),
+    ),
     Case(
         # The docs cover on-call (a placeholder rotation link) but not the fact asked.
         # Caught live in SB-1476: docs-agent said "the docs don't name anyone" at high
@@ -215,11 +255,24 @@ async def run_evals(retriever: Retriever | None = None, corpus: Corpus | None = 
     agent = WithDeps(build_agent(), deps, caller="eval")
     judge = PricedModel(JUDGE_MODEL)
     agent_cost: list[float] = []
+    requests: list[float] = []
+    tool_calls: list[float] = []
+    limits = 0
 
     async def answer(question: str) -> DocsAnswer:
-        result = await agent.run(question)
-        if result.usage.cost is not None:
-            agent_cost.append(float(result.usage.cost))
+        nonlocal limits
+        try:
+            result = await agent.run(question)
+        except UsageLimitExceeded:
+            limits += 1  # over budget: no usage to report, the case fails
+            raise
+        usage = result.usage
+        if usage.cost is not None:
+            agent_cost.append(float(usage.cost))
+        requests.append(usage.requests)
+        tool_calls.append(usage.tool_calls)
+        increment_eval_metric("requests", usage.requests)
+        increment_eval_metric("tool_calls", usage.tool_calls)
         return result.output
 
     start = time.perf_counter()
@@ -239,10 +292,21 @@ async def run_evals(retriever: Retriever | None = None, corpus: Corpus | None = 
         agent_cost_usd=sum(agent_cost) if agent_cost else None,
         judge_cost_usd=judge.cost_usd,
         duration_s=round(time.perf_counter() - start, 1),
+        requests_p50=percentile(requests, 50),
+        requests_p95=percentile(requests, 95),
+        tool_calls_p50=percentile(tool_calls, 50),
+        tool_calls_p95=percentile(tool_calls, 95),
+        limit_failures=limits,
     )
     emit_eval(record)
     print(f"\n{passed}/{total} cases passed ({rate:.0%}); threshold {PASS_THRESHOLD:.0%}")
     print("per evaluator: " + ", ".join(f"{k} {v:.0%}" for k, v in scores.items()))
+    print(
+        f"budget: requests p50 {record.requests_p50} p95 {record.requests_p95}, tool calls "
+        f"p50 {record.tool_calls_p50} p95 {record.tool_calls_p95}; "
+        f"{limits} case(s) hit a usage cap (caps: {USAGE_LIMITS.request_limit} requests, "
+        f"{USAGE_LIMITS.tool_calls_limit} tool calls)"
+    )
     cost = record.cost_usd
     print(f"cost: ${cost:.4f}" if cost is not None else "cost: unknown", end="")
     agent_cost = "unpriced" if record.agent_cost_usd is None else f"${record.agent_cost_usd:.4f}"

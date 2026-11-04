@@ -144,3 +144,12 @@ def test_price_uses_registry_provider_and_local_is_free() -> None:
     by_ref = price("anthropic:claude-haiku-5-5", input_tokens=1000, output_tokens=1000)
     by_name = price("claude-haiku-5-5", input_tokens=1000, output_tokens=1000)
     assert by_ref == by_name and by_ref
+
+
+def test_percentile_nearest_rank() -> None:
+    from sb_obs.evals import percentile
+
+    assert percentile([], 50) is None
+    assert percentile([3], 95) == 3.0
+    assert percentile([1, 2, 3, 4], 50) == 2.0
+    assert percentile([4, 1, 3, 2, 10], 95) == 10.0

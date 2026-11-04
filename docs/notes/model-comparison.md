@@ -134,11 +134,38 @@ model replaces Haiku again: add open-ended cases (e.g. these two) to the eval an
 tool calls per case (p50/p95) next to the pass rate. Raising `tool_calls_limit` to fit
 one model would hide the same signal.
 
+### Tool-call budget in the eval (SB-1530, 2026-11-04)
+
+The eval now has four open-ended cases (18 in all) and reports what each case cost in
+model requests and tool calls: per case in the report, p50/p95 in the summary line and
+the `EvalRecord` (`requests_p50/p95`, `tool_calls_p50/p95`, `limit_failures`). Two of the
+new cases are the questions DeepSeek failed live; neither is in the corpus (sb-agents
+isn't indexed), so passing means saying "not covered" within budget.
+
+| Model | Passed | Requests p50 / p95 | Tool calls p50 / p95 | Hit a cap | Agent $ / eval |
+|---|---|---|---|---|---|
+| claude-haiku-5-5 (run 1) | **18/18** | 3 / 7 | 4 / 9 | 0 | $0.034 |
+| claude-haiku-5-5 (run 2) | 17/18 | 3 / 5 | 3 / 8 | 0 | $0.033 |
+| deepseek/deepseek-v4.1-flash | 15/18 | 3 / 6 | 4 / 9 | **3** | $0.003 |
+| z-ai/glm-5.3-flash | 15/18 | 3 / 4 | 4 / 5 | **2** | $0.017 |
+
+- **The eval now reproduces the live failure.** DeepSeek and GLM both hit the 12-call
+  cap on `open-sb-agents-k3s` and `open-mt-agent-auth` (13-14 calls): when the answer
+  isn't in the docs they keep searching, where Haiku gives up within budget. DeepSeek
+  also blew the 100k token cap on `chezmoi-source-path` (230k tokens), a narrow case it
+  had passed before.
+- p50 is the same for all three; the difference is the tail, which a pass rate alone
+  hid. That is why p95 and cap hits are now in the record.
+- Haiku's one miss in run 2 was the judge on `open-mt-deploy-healthy`, not budget.
+- **Default stays Haiku.** Neither cheaper model passes on both quality and budget.
+  Raising the caps to fit them would hide exactly this.
+
 ## Recommendation per role (2026-11-04)
 
-- **Specialist (docs-agent): keep Haiku.** DeepSeek-v4.1-flash passes the eval (14/14 x2
-  at 100k tokens) at ~1/8 the cost but overruns the tool-call cap on open questions.
-  GLM-5.3-flash (14/14 x3, about Haiku's price) hasn't had the live check yet. Either is
+- **Specialist (docs-agent): keep Haiku.** DeepSeek-v4.1-flash and GLM-5.3-flash both
+  overrun the tool-call cap on open questions the docs don't cover (SB-1530 eval, above).
+  A prompt rule like "after N searches with no hit, say the docs don't cover it" is the
+  thing to try before switching. Either is
   one env var away: `DOCS_AGENT_MODEL=openrouter:<id>`; the k3s Secret already has the key.
 - **Router (sb-support):** keep Haiku. It drives the Slack conversation and escalation,
   and has no eval of its own yet; switch only after one exists.
