@@ -16,8 +16,8 @@ def test_shipped_registry_loads_and_every_default_resolves() -> None:
     for agent in AGENTS:
         spec = reg.resolve(agent, env=KEYS)
         assert spec.ref in reg.models
-    # Defaults unchanged by the registry: Haiku 5.5 for the agents.
-    assert reg.resolve("docs-agent", env=KEYS).ref == "anthropic:claude-haiku-5-5"
+    assert reg.resolve("docs-agent", env=KEYS).ref == "openrouter:deepseek/deepseek-v4.1-flash"
+    assert reg.resolve("sb-support", env=KEYS).ref == "anthropic:claude-haiku-5-5"
 
 
 def test_every_model_has_its_provider_and_metadata() -> None:
@@ -27,9 +27,7 @@ def test_every_model_has_its_provider_and_metadata() -> None:
         assert spec.local == (spec.provider == "ollama")
 
 
-@pytest.mark.parametrize(
-    "ref", ["openrouter:deepseek/deepseek-v4.1-flash", "ollama:gemma4:12b-16k"]
-)
+@pytest.mark.parametrize("ref", ["anthropic:claude-haiku-5-5", "ollama:gemma4:12b-16k"])
 def test_env_var_switches_a_pydantic_ai_agent_with_no_code_change(ref: str) -> None:
     spec = registry().resolve("docs-agent", env={**KEYS, "DOCS_AGENT_MODEL": ref})
     assert spec.ref == ref
@@ -92,8 +90,8 @@ def test_unknown_agent_and_bad_model_key() -> None:
 
 
 def test_eval_result_recorded() -> None:
-    ev = registry().models["openrouter:deepseek/deepseek-v4.1-flash"].eval
-    assert ev is not None and ev.passed == 13 and round(ev.pass_rate, 2) == 0.93
+    ev = registry().models["ollama:gemma4:12b-16k"].eval
+    assert ev is not None and ev.passed == 11 and round(ev.pass_rate, 2) == 0.79
 
 
 @pytest.mark.parametrize(

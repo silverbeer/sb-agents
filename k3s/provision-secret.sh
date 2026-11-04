@@ -15,7 +15,7 @@ op run --env-file .env.op --env-file .env.mt.op -- python3 - <<'PY' | kubectl --
 import base64, json, os, sys
 
 SECRETS = {
-    "docs-agent": ("ANTHROPIC_API_KEY",),
+    "docs-agent": ("ANTHROPIC_API_KEY", "OPENROUTER_API_KEY"),  # OpenRouter: SB-1490
     "mt-agent": ("ANTHROPIC_API_KEY", "MT_AGENT_MCP_TOKEN"),
     "sb-support": ("ANTHROPIC_API_KEY", "SLACK_BOT_TOKEN", "SLACK_APP_TOKEN"),
 }
