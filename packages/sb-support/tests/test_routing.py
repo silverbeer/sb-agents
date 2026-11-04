@@ -282,6 +282,11 @@ def test_parse_tables_keeps_well_formed_ones_and_cleans_floats() -> None:
     }
     [table] = parse_tables(data)
     assert table.rows == [["1", "22"], ["2", "18"]]
+    assert table.notes == []
+    [noted] = parse_tables({"tables": [{**data["tables"][0], "notes": ["Hot run.", "", 3.0]}]})
+    assert noted.notes == ["Hot run.", "3.0"]
+    [bad] = parse_tables({"tables": [{**data["tables"][0], "notes": "not a list"}]})
+    assert bad.notes == []
     assert parse_tables(None) == [] and parse_tables({"tables": "x"}) == []
 
 

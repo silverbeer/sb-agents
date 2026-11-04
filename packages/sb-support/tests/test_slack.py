@@ -144,7 +144,7 @@ async def test_docs_client_unreachable_raises_docs_agent_error() -> None:
 # --- tables (SB-1528) ----------------------------------------------------------------
 
 
-def _reply_with_table(text: str = "IFA are 10th.", **kw):
+def _reply_with_table(text: str = "IFA are 10th.", notes: list[str] | None = None, **kw):
     from sb_support.core import Reply
     from sb_support.tables import Table
 
@@ -152,6 +152,7 @@ def _reply_with_table(text: str = "IFA are 10th.", **kw):
         "Homegrown Northeast U15 (League)",
         ["#", "Team", "Pts"],
         [["1", "Metropolitan Oval", "22"], ["10", "IFA", "6"]],
+        notes or [],
     )
     return Reply(text, tables=[table], **kw)
 
@@ -170,7 +171,28 @@ async def test_a_table_is_posted_as_a_block_kit_table() -> None:
     assert table["type"] == "table"
     assert [c["text"] for c in table["rows"][0]] == ["#", "Team", "Pts"]  # header row
     assert [c["text"] for c in table["rows"][2]] == ["10", "IFA", "6"]
-    assert table["column_settings"] == [{"align": "right"}, None, {"align": "right"}]
+    # Slack rejects a null entry ("must provide an object"): every column gets one.
+    assert table["column_settings"] == [{"align": "right"}, {"align": "left"}, {"align": "right"}]
+
+
+async def test_trend_notes_follow_the_table_in_blocks_and_in_the_fallback() -> None:
+    from sb_support.slack import post_reply
+
+    notes = ["Hottest run: IFA, 3 straight wins.", "Biggest climb: IFA, up 5."]
+    client = fake_client()
+    await post_reply(client, "C1", "111.1", _reply_with_table(notes=notes))
+    *_, table, after = client.chat_postMessage.await_args.kwargs["blocks"]
+    assert table["type"] == "table" and after["type"] == "context"
+    assert after["elements"][0]["text"] == "• " + "\n• ".join(notes)
+
+    client = fake_client()
+    client.chat_postMessage = AsyncMock(side_effect=[RuntimeError("invalid_blocks"), None])
+    await post_reply(client, "C1", "111.1", _reply_with_table(notes=notes))
+    assert (
+        client.chat_postMessage.await_args_list[1]
+        .kwargs["text"]
+        .endswith("```\n" + "\n".join(notes))
+    )
 
 
 async def test_rejected_blocks_fall_back_to_a_code_block() -> None:

@@ -9,7 +9,7 @@ agent never knows about Slack.
 
 from __future__ import annotations
 
-from typing import Any, TypedDict
+from typing import Any, NotRequired, TypedDict
 
 MAX_ROWS = 25
 
@@ -18,6 +18,7 @@ class Table(TypedDict):
     title: str
     columns: list[str]
     rows: list[list[str]]
+    notes: NotRequired[list[str]]  # trends computed here, from the data (SB-1533)
 
 
 def _name(team: dict[str, Any] | None) -> str:
@@ -37,7 +38,7 @@ def standings_table(result: dict[str, Any]) -> Table | None:
         title += f": {coverage}"
     return Table(
         title=title,
-        columns=["#", "Team", "P", "W", "D", "L", "GD", "Pts"],
+        columns=["#", "Team", "P", "W", "D", "L", "GD", "Pts", "Last 5", "±"],
         rows=[
             [
                 str(r["position"]),
@@ -48,10 +49,89 @@ def standings_table(result: dict[str, Any]) -> Table | None:
                 str(r["losses"]),
                 f"{r['goal_difference']:+d}" if "goal_difference" in r else "",
                 str(r["points"]),
+                "".join(r.get("form") or []),
+                _movement(r.get("position_change") or 0),
             ]
             for r in rows[:MAX_ROWS]
         ],
+        notes=standings_notes(rows),
     )
+
+
+def _movement(change: int) -> str:
+    """Places moved since the table before the latest match day (mt-mcp's position_change)."""
+    if change > 0:
+        return f"▲{change}"
+    if change < 0:
+        return f"▼{-change}"
+    return ""
+
+
+def _run(form: list[str], results: set[str]) -> int:
+    """How many of the latest results (form is oldest first) are in `results`."""
+    count = 0
+    for result in reversed(form):
+        if result not in results:
+            break
+        count += 1
+    return count
+
+
+def _names(rows: list[dict[str, Any]]) -> str:
+    return " and ".join(_name(r.get("team")) for r in rows[:2])
+
+
+def _best(rows: list[dict[str, Any]], key: Any, minimum: float) -> tuple[float, list[dict]]:
+    """The rows sharing the top value of `key`, if it reaches `minimum`."""
+    top = max((key(r) for r in rows), default=0)
+    return top, ([r for r in rows if key(r) == top] if top >= minimum else [])
+
+
+# Thresholds for a note to be worth saying. A run counts only the last five results
+# (mt-mcp's form window), so "5 in a row" means "at least 5".
+MIN_RUN, MIN_MOVE, MIN_PLAYED_GAP, MIN_PLAYED = 3, 2, 2, 3
+
+
+def standings_notes(rows: list[dict[str, Any]]) -> list[str]:
+    """A few facts about the table's trends, computed from `form` and `position_change`.
+
+    Deterministic on purpose: a model asked to "spot a trend" in 20 rows miscounts
+    ("5 wins... more precisely 2"). Each note says what it measures.
+    """
+    notes = []
+    form = {id(r): r.get("form") or [] for r in rows}
+    wins, hot = _best(rows, lambda r: _run(form[id(r)], {"W"}), MIN_RUN)
+    if hot:
+        notes.append(f"Hottest run: {_names(hot)}, {wins} straight wins.")
+    losses, cold = _best(rows, lambda r: _run(form[id(r)], {"L"}), MIN_RUN)
+    if cold:
+        notes.append(f"Coldest run: {_names(cold)}, {losses} straight losses.")
+    up, risers = _best(rows, lambda r: r.get("position_change") or 0, MIN_MOVE)
+    if risers:
+        notes.append(f"Biggest climb since the last match day: {_names(risers)}, up {up}.")
+    down, fallers = _best(rows, lambda r: -(r.get("position_change") or 0), MIN_MOVE)
+    if fallers:
+        notes.append(f"Biggest drop since the last match day: {_names(fallers)}, down {down}.")
+    notes.extend(_games_in_hand(rows))
+    return notes
+
+
+def _games_in_hand(rows: list[dict[str, Any]]) -> list[str]:
+    """The best points-per-game side, when it isn't the leader and has played fewer."""
+    played = [r for r in rows if r["played"] >= MIN_PLAYED]
+    if not played or rows[0] not in played:
+        return []
+    leader = rows[0]
+    best = max(played, key=lambda r: (r["points"] / r["played"], -r["position"]))
+    gap = leader["played"] - best["played"]
+    if best is leader or gap < MIN_PLAYED_GAP:
+        return []
+    return [
+        f"Games in hand: {_name(best.get('team'))} ({best['points']} pts from "
+        f"{best['played']}, {best['points'] / best['played']:.2f} per game) has played "
+        f"{gap} fewer than leader {_name(leader.get('team'))} ({leader['points']} from "
+        f"{leader['played']}, {leader['points'] / leader['played']:.2f})."
+    ]
 
 
 def results_table(result: dict[str, Any]) -> Table | None:

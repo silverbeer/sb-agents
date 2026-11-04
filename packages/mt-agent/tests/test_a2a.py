@@ -211,6 +211,8 @@ async def test_standings_table_survives_the_a2a_data_part() -> None:
                 "losses": 1,
                 "goal_difference": 9,
                 "points": 15,
+                "form": ["W", "W", "W", "L", "W"],
+                "position_change": 2,
             },
         ],
         "coverage": {"matches_counted": 18, "fixtures": 42},
@@ -224,4 +226,5 @@ async def test_standings_table_survives_the_a2a_data_part() -> None:
 
     [table] = parse_tables(answer.data)
     assert table.title.startswith("Homegrown Northeast U14 (League)")
-    assert table.rows == [["1", "IFA", "6", "5", "0", "1", "+9", "15"]]
+    assert table.rows == [["1", "IFA", "6", "5", "0", "1", "+9", "15", "WWWLW", "▲2"]]
+    assert table.notes == ["Biggest climb since the last match day: IFA, up 2."]

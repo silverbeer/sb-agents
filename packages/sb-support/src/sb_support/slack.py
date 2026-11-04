@@ -81,7 +81,8 @@ def escalation_text(reason: str) -> str:
 
 # Block Kit limits (docs.slack.dev/reference/block-kit/blocks/table-block, read 2026-11-04):
 # 100 rows, 20 cells a row, 10,000 characters across a message's table cells; a section's
-# mrkdwn text is at most 3,000 characters.
+# mrkdwn text is at most 3,000 characters. Every `column_settings` entry must be an object:
+# Slack answered `null` with "invalid_blocks: must provide an object" (SB-1533).
 TABLE_MAX_ROWS, TABLE_MAX_COLS, TABLE_MAX_CHARS, SECTION_MAX = 100, 20, 10_000, 3_000
 _NUMERIC = re.compile(r"^[+-]?\d+$")
 
@@ -98,7 +99,7 @@ def table_block(table: Table) -> dict[str, Any] | None:
     ]
     return {
         "type": "table",
-        "column_settings": [{"align": "right"} if n else None for n in numeric],
+        "column_settings": [{"align": "right" if n else "left"} for n in numeric],
         "rows": [[{"type": "raw_text", "text": c or " "} for c in r] for r in rows],
     }
 
@@ -109,7 +110,8 @@ def table_as_code(table: Table) -> str:
     widths = [max(len(r[i]) for r in rows) for i in range(len(table.columns))]
     lines = ["  ".join(c.ljust(w) for c, w in zip(r, widths, strict=True)).rstrip() for r in rows]
     title = f"*{table.title}*\n" if table.title else ""
-    return f"{title}```\n" + "\n".join(lines) + "\n```"
+    notes = "".join(f"\n{n}" for n in table.notes)
+    return f"{title}```\n" + "\n".join(lines) + "\n```" + notes
 
 
 def blocks_for(reply: Reply, text: str) -> list[dict[str, Any]] | None:
@@ -126,6 +128,9 @@ def blocks_for(reply: Reply, text: str) -> list[dict[str, Any]] | None:
             {"type": "context", "elements": [{"type": "mrkdwn", "text": f"*{table.title}*"}]}
         )
     out.append(block)
+    if table.notes:
+        notes = "\n".join(f"• {n}" for n in table.notes)
+        out.append({"type": "context", "elements": [{"type": "mrkdwn", "text": notes}]})
     return out
 
 
