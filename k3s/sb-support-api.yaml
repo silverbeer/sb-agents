@@ -1,0 +1,58 @@
+# MT app adapter (SB-1500): MT's backend → sb-support core over HTTP.
+# ClusterIP only: reaching it from MT prod (LKE) is a separate, explicit decision.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sb-support-api
+  namespace: sb-agents
+  labels: {app: sb-support-api}
+spec:
+  replicas: 1
+  # One in-memory conversation store at a time.
+  strategy: {type: Recreate}
+  selector:
+    matchLabels: {app: sb-support-api}
+  template:
+    metadata:
+      labels: {app: sb-support-api}
+    spec:
+      enableServiceLinks: false
+      hostAliases:
+      - ip: 192.168.5.2
+        hostnames: [host.lima.internal]
+      containers:
+      - name: sb-support-api
+        image: sb-agents:IMAGE_TAG
+        imagePullPolicy: Never
+        command: [sb-support-api]
+        ports:
+        - {name: http, containerPort: 8103}
+        env:
+        - name: ANTHROPIC_API_KEY
+          valueFrom: {secretKeyRef: {name: sb-support, key: ANTHROPIC_API_KEY}}
+        - name: SB_SUPPORT_API_TOKEN
+          valueFrom: {secretKeyRef: {name: sb-support-api-token, key: SB_SUPPORT_API_TOKEN}}
+        - {name: SB_SUPPORT_API_HOST, value: "0.0.0.0"}
+        - {name: OTEL_EXPORTER_OTLP_ENDPOINT, value: "http://host.lima.internal:4318"}
+        - {name: SB_ENV, value: homelab}
+        - {name: SB_OBS_CAPTURE_CONTENT, value: "1"}
+        - {name: SB_SUPPORT_SPECIALISTS, value: "http://docs-agent.sb-agents.svc.cluster.local:8101,http://mt-agent.sb-agents.svc.cluster.local:8102"}
+        readinessProbe:
+          httpGet: {path: /healthz, port: http}
+          periodSeconds: 5
+        livenessProbe:
+          tcpSocket: {port: http}
+          periodSeconds: 20
+        resources:
+          requests: {cpu: 50m, memory: 192Mi}
+          limits: {memory: 768Mi}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: sb-support-api
+  namespace: sb-agents
+spec:
+  selector: {app: sb-support-api}
+  ports:
+  - {name: http, port: 8103, targetPort: http}
