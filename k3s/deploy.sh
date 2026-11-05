@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Build the sb-agents image into k3s and roll out docs-agent, mt-agent and sb-support.
+# Build the sb-agents image into k3s and roll out docs-agent, mt-agent, sb-support and
+# sb-support-api.
 #
 #   bash k3s/deploy.sh               # build, secrets, apply, wait, prune old images
 #   bash k3s/deploy.sh --skip-build  # re-apply manifests/secrets on the current image
@@ -29,8 +30,9 @@ fi
 
 k apply -f k3s/namespace.yaml
 bash k3s/provision-secret.sh
+bash k3s/api-token.sh
 # Specialists first: sb-support discovers them once, at startup.
-for app in docs-agent mt-agent sb-support; do
+for app in docs-agent mt-agent sb-support sb-support-api; do
     sed "s/IMAGE_TAG/$TAG/g" "k3s/$app.yaml" | k apply -f -
     # Secrets and env are read at start; a re-apply with the same image must still restart.
     k -n sb-agents rollout restart "deploy/$app" >/dev/null

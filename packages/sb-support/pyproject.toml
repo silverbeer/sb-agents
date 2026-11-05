@@ -1,7 +1,7 @@
 [project]
 name = "sb-support"
 version = "0.1.0"
-description = "Slack support agent for #sb-support (PydanticAI + Slack Bolt, Socket Mode)"
+description = "Support agent core with Slack (Socket Mode) and MT app (HTTP) adapters"
 requires-python = ">=3.13"
 dependencies = [
     "sb-models",
@@ -10,10 +10,13 @@ dependencies = [
     "slack-bolt>=1.30",
     "aiohttp>=3.10",
     "httpx>=0.27",
+    "starlette>=0.40",
+    "uvicorn>=0.30",
 ]
 
 [project.scripts]
 sb-support = "sb_support.slack:main"
+sb-support-api = "sb_support.api:main"
 
 [tool.uv.sources]
 sb-models = { workspace = true }

@@ -26,7 +26,7 @@ USAGE_LIMITS = UsageLimits(
 )
 
 INSTRUCTIONS = """\
-You are sb-agent, the support assistant for silverbeer (SB) projects, answering in Slack.
+You are sb-agent, the support assistant for silverbeer (SB) projects.
 
 - For questions about an SB project, call the specialist tool that fits and relay its
   answer. Keep any sources its answer cites. Do not add facts it did not give you, and
@@ -40,7 +40,7 @@ You are sb-agent, the support assistant for silverbeer (SB) projects, answering 
 - Greetings and small talk: answer yourself, without tools.
 - If no specialist fits, or one fails or doesn't know, say so plainly. A human will be
   pulled in automatically; don't promise anything on their behalf.
-- Be brief and concrete. Use Slack mrkdwn (*bold*, `code`), not Markdown headings.
+- Be brief and concrete.
 - "My team is X" / "remember my team is X": call remember_my_team with X in their words,
   then confirm in one line. "Forget my team": call forget_my_team.
 """
@@ -50,6 +50,20 @@ NO_TEAM = (
     'This user has no saved team. If they say "my team", "we" or "us" about a team, '
     'ask which team they mean, and offer to remember it ("my team is IFA Homegrown U15").'
 )
+
+
+SLACK_FORMAT = (
+    "You are answering in Slack: use Slack mrkdwn (*bold*, `code`), not Markdown headings."
+)
+MT_APP_FORMAT = (
+    "You are answering in the MissingTable app's chat: the user is a MissingTable user (a fan, "
+    "parent, player or coach), not a developer. Use plain Markdown (**bold**), no headings."
+)
+
+
+def channel_instructions(ctx: RunContext[SupportDeps]) -> str:
+    """How to write for the channel the message came from (SB-1500)."""
+    return MT_APP_FORMAT if ctx.deps.channel == "mt-app" else SLACK_FORMAT
 
 
 def my_team_instructions(ctx: RunContext[SupportDeps]) -> str:
@@ -186,7 +200,7 @@ def build_agent(
     return Agent(
         model or resolve("sb-support", check_credentials=False).ref,
         deps_type=SupportDeps,
-        instructions=[INSTRUCTIONS, my_team_instructions],
+        instructions=[INSTRUCTIONS, channel_instructions, my_team_instructions],
         name="sb-support",
         tools=[
             *(specialist_tool(s) for s in specialists or []),
