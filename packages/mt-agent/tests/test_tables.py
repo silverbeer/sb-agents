@@ -134,11 +134,11 @@ def test_movement_and_form_cells() -> None:
     rows = standings_table({**STANDINGS, "rows": TABLE})["rows"]
     # Movement rides in the # column; form is squares, oldest first (newest on the right).
     assert [(r[0], r[8]) for r in rows[3:6]] == [
-        ("6 ▲4", "🟥🟥🟥🟩🟩"),
-        ("10 ▲5", "🟥🟥🟩🟥🟩"),
-        ("12 ▼3", "🟩🟩🟥🟥🟥"),
+        ("6 ▲4", "🟥 🟥 🟥 🟩 🟩"),
+        ("10 ▲5", "🟥 🟥 🟩 🟥 🟩"),
+        ("12 ▼3", "🟩 🟩 🟥 🟥 🟥"),
     ]
-    assert rows[2][8] == "🟩🟩🟩🟩🟨"
+    assert rows[2][8] == "🟩 🟩 🟩 🟩 🟨"
 
 
 def test_quiet_table_has_no_notes() -> None:

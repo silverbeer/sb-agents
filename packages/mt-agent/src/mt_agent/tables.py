@@ -24,6 +24,7 @@ class Table(TypedDict):
 
 
 # Form as squares reads at a glance; the channel needs no legend for W/D/L letters.
+# Spaced, so adjacent squares don't merge into one bar (picked in Slack, SB-1541).
 FORM_SQUARES = {"W": "🟩", "D": "🟨", "L": "🟥"}
 
 
@@ -72,7 +73,7 @@ def standings_table(result: dict[str, Any]) -> Table | None:
                 str(r["losses"]),
                 f"{r['goal_difference']:+d}" if "goal_difference" in r else "",
                 str(r["points"]),
-                "".join(FORM_SQUARES.get(x, x) for x in r.get("form") or []),
+                " ".join(FORM_SQUARES.get(x, x) for x in r.get("form") or []),
             ]
             for r in shown
         ],
