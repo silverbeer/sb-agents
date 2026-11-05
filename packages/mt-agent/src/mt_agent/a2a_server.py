@@ -14,13 +14,17 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 from a2a.types import AgentCapabilities, AgentCard, AgentExtension, AgentInterface, AgentSkill
+from google.adk.a2a.executor.a2a_agent_executor import A2aAgentExecutor
+from google.adk.a2a.executor.config import A2aAgentExecutorConfig
 from google.adk.a2a.utils.agent_to_a2a import to_a2a
 from google.adk.agents import LlmAgent
+from google.adk.runners import Runner
 from google.adk.tools.base_toolset import BaseToolset
 from sb_models import ModelConfigError, resolve
 from starlette.applications import Starlette
 
 from mt_agent.agent import build_agent
+from mt_agent.identity import IDENTITY_EXTENSION, request_converter
 from mt_agent.runner import TrackedRunner
 from sb_obs import instrument_asgi, setup_telemetry
 
@@ -65,7 +69,15 @@ def build_card(url: str) -> AgentCard:
                         "Send the same contextId for follow-up messages: each context is "
                         "one conversation (an ADK session, kept 30 minutes idle)."
                     ),
-                )
+                ),
+                AgentExtension(
+                    uri=IDENTITY_EXTENSION,
+                    description=(
+                        "Send the MT user's delegated token in params.metadata as "
+                        '{"<this uri>": {"token": ...}} to answer as that user ("my team"). '
+                        "Used for that request only; never stored."
+                    ),
+                ),
             ],
         ),
         default_input_modes=["text/plain"],
@@ -115,6 +127,14 @@ def build_app(agent: LlmAgent | None = None, url: str | None = None) -> Starlett
         runner=TrackedRunner(agent),
         agent_card=build_card(url or os.environ.get("MT_AGENT_A2A_URL", f"http://{host}:{port}")),
         lifespan=close_toolsets,
+        agent_executor_factory=executor,
+    )
+
+
+def executor(runner: Runner) -> A2aAgentExecutor:
+    """ADK's executor with the identity-stripping request converter (SB-1529)."""
+    return A2aAgentExecutor(
+        runner=runner, config=A2aAgentExecutorConfig(request_converter=request_converter)
     )
 
 

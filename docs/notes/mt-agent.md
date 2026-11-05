@@ -78,7 +78,8 @@ option after `ambiguous`, and a search that missed and then hit is fine. Ending 
 means the model asked a clarifying question or said the data is unavailable: that's
 `low`, and sb-support escalates. No tool call is `low` because everything routed here is
 a data question; "my team" is answered with a question, so it escalates too. That is
-deliberate for phase 1 (Slack users have no MT identity) and noisy; revisit with SB-1500.
+deliberate for phase 1 (Slack users have no MT identity) and noisy. Since SB-1564 Slack
+users can save a team, and since SB-1529 MT app users are answered as themselves.
 
 **Why not ask the model** (an output schema with a `confidence` field, as docs-agent does):
 the facts it would judge are already in the tool results, deterministically. A rule is
@@ -180,13 +181,30 @@ call regardless.
 Unset token: `main()` logs a warning and starts; mt-mcp answers 401, every tool call
 fails, and every answer is `low`.
 
-**Phase 2 (vision.md, "who is asking"):** the end user's identity flows to the data layer.
-The MT Chat adapter (SB-1500) already holds the user's MT token; it travels on the A2A
-request (as an auth header or message metadata, decided then), and mt-agent builds the
-toolset per request with that token through `McpToolset(header_provider=...)`. Then
-`get_my_team` and the `my` tier can be enabled for that caller, and Slack keeps the
-public identity until a Slack ↔ MT account link exists. Also open: auth between agents
-(SB-1480).
+**Phase 2 (SB-1529): the signed-in MT user.** Only the MT app channel has an MT identity;
+Slack and Telegram stay on phase 1 (Slack users save a "my team" text instead, SB-1564).
+
+```
+MT backend ── mints a 5-minute delegated token for the user (mt-mcp caps it to read/my/self)
+  └▶ sb-support-api  {"user_token": ...}              → InboundMessage.credential
+      └▶ A2A params.metadata {"urn:sb-agents:a2a:mt-identity:v1": {"token": ...}}
+         only to specialists whose card declares that extension (mt-agent; never docs-agent)
+          └▶ mt-agent request converter: token out of the metadata, into a ContextVar
+              └▶ McpToolset header_provider: Authorization: Bearer <token>,
+                 X-MT-Client: sb-agents-user; get_my_team visible; "my team" rule changes
+```
+
+- **Why not ADK's metadata path:** ADK copies A2A request metadata into
+  `RunConfig.custom_metadata` and from there onto every event, the session, and the A2A
+  replies. `mt_agent.identity.request_converter` removes the entry before ADK sees it.
+- **Per request:** the ContextVar is set (to `None` too) by every request's converter and
+  cleared when the run ends. A follow-up without a token is phase 1 again.
+- **Never kept:** not in repr (`field(repr=False)`), logs, spans, the session, the model's
+  context or the reply (tests in `test_identity.py`, `test_routing.py`).
+- **MCP sessions:** ADK pools one per header set, so each signed-in request opens its own;
+  idle ones are evicted after ADK's TTL, and closed with the pool at shutdown.
+
+Still open: auth between agents (SB-1480).
 
 ## Follow-up questions: A2A contextId → ADK session (SB-1525)
 

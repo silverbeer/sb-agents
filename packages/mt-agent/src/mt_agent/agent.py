@@ -2,8 +2,10 @@
 
 An ADK `LlmAgent` whose tools all come from mt-mcp over MCP (streamable HTTP). The
 server decides what this caller may see; `tool_filter` repeats the cap here, so a
-server bug can't widen it. Phase 1 calls mt-mcp as one public, read-only identity
-(`MT_AGENT_MCP_TOKEN`): Slack users have no MT identity yet, so `get_my_team` is out.
+server bug can't widen it. Without a user, mt-mcp is called as one public, read-only
+identity (`MT_AGENT_MCP_TOKEN`) and `get_my_team` is hidden. A request carrying the MT
+user's delegated token (SB-1529, `mt_agent.identity`) calls mt-mcp as that user, and
+the model gets `get_my_team`.
 """
 
 from __future__ import annotations
@@ -19,6 +21,7 @@ from google.adk.models.base_llm import BaseLlm
 from google.adk.tools.mcp_tool import McpToolset, StreamableHTTPConnectionParams
 from sb_models import resolve
 
+from mt_agent.identity import USER_TOOLS, mcp_headers, signed_in
 from mt_agent.mt_client import CLIENT_HEADER, DEFAULT_MCP_URL
 
 # ADK probes for Google mTLS before every MCP session (google.auth.default(), which
@@ -69,7 +72,7 @@ matches and standings. Use ONLY your tools; only state facts that appear in tool
 - Never guess a team. If search_teams says "ambiguous", ask which one and list the
   candidates (name, age group, league). If "not_found" with "other_ages", say the team plays
   at those ages instead. Otherwise say plainly that no such team was found.
-- "My team", "we", "us": you don't know who is asking. Ask which team they mean.
+{my_team}
 - If a tool result has an "error", say in one sentence that the data is unavailable right
   now. Do not invent an answer.
 - Standings, results and upcoming matches reach the user as a table built from your tool
@@ -78,6 +81,29 @@ matches and standings. Use ONLY your tools; only state facts that appear in tool
   instead: the leader, or the asked-about team's position and points, plus coverage.
 - Keep answers short and Slack-friendly: a sentence or two. No tables.
 """
+
+
+ANONYMOUS = """\
+- "My team", "we", "us": you don't know who is asking. Ask which team they mean."""
+SIGNED_IN = """\
+- "My team", "we", "us": the user is signed in. Call get_my_team first; it returns their
+  team(s) with team_id and age_group id. If it lists more than one, ask which one. If it
+  says they have no team, say so and suggest picking one in their MissingTable profile.
+  A team they name explicitly wins over their own team."""
+
+
+def instruction_provider(template: str):
+    """ADK InstructionProvider: the "my team" rule depends on who is asking (SB-1529)."""
+
+    def provide(_context: Any) -> str:
+        return template.replace("{my_team}", SIGNED_IN if signed_in() else ANONYMOUS)
+
+    return provide
+
+
+def visible_tool(tool: Any, _context: Any = None) -> bool:
+    """`tool_filter`: the read tools always; user tools only for a signed-in request."""
+    return tool.name in TOOLS or (tool.name in USER_TOOLS and signed_in())
 
 
 def build_toolset(
@@ -101,7 +127,9 @@ def build_toolset(
     if httpx_client_factory is not None:
         params["httpx_client_factory"] = httpx_client_factory
     return McpToolset(
-        connection_params=StreamableHTTPConnectionParams(**params), tool_filter=list(TOOLS)
+        connection_params=StreamableHTTPConnectionParams(**params),
+        tool_filter=visible_tool,
+        header_provider=mcp_headers,
     )
 
 
@@ -182,7 +210,7 @@ def build_agent(
         name=NAME,
         model=model,
         description="Answers questions about MissingTable teams, matches and standings.",
-        instruction=instruction,
+        instruction=instruction_provider(instruction),
         tools=tools,
         after_tool_callback=_after_tool,
     )

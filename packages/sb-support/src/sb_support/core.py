@@ -44,6 +44,9 @@ class InboundMessage:
     text: str  # what the user asked, channel markup (e.g. mentions) already removed
     user_id: str | None = None
     message_id: str | None = None
+    # The user's delegated MT token (mt-app, SB-1529). Forwarded only to specialists that
+    # declare the identity extension; never logged, never in a span, not in repr.
+    credential: str | None = field(default=None, repr=False)
     # Extra span attributes from the adapter, e.g. {"slack.ts": "..."}. Not sent to the model.
     attributes: Mapping[str, str] = field(default_factory=dict)
 
@@ -97,12 +100,19 @@ async def answer(
     caller: str = "direct",
     user_id: str | None = None,
     prefs: PreferenceStore | None = None,
+    credential: str | None = None,
 ) -> Reply:
     """Run under usage limits with the conversation's history; emit a RunRecord.
 
     Raises `UsageLimitExceeded` and any agent error; `SupportCore.handle` maps them.
     """
-    deps = SupportDeps(conversation_key=key, channel=caller, user_id=user_id, prefs=prefs)
+    deps = SupportDeps(
+        conversation_key=key,
+        channel=caller,
+        user_id=user_id,
+        prefs=prefs,
+        credential=credential,
+    )
     history = memory.history(key) if memory is not None and key else []
     with track_run("sb-support", caller=caller, model=agent.model) as run:
         try:
@@ -171,6 +181,7 @@ class SupportCore:
                         msg.channel,
                         user_id=msg.user_id,
                         prefs=self.prefs,
+                        credential=msg.credential,
                     )
                 except UsageLimitExceeded:
                     reply = Reply(LIMIT_TEXT, "limit")
