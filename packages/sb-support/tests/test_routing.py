@@ -22,10 +22,14 @@ class StubClient:
     fail: bool = False
     asked: list[str] | None = None
     contexts: list[str | None] | None = None
+    metadata: list[dict | None] | None = None
 
-    async def ask(self, question: str, context_id: str | None = None) -> SpecialistAnswer:
+    async def ask(
+        self, question: str, context_id: str | None = None, metadata: dict | None = None
+    ) -> SpecialistAnswer:
         (self.asked if self.asked is not None else []).append(question)
         (self.contexts if self.contexts is not None else []).append(context_id)
+        (self.metadata if self.metadata is not None else []).append(metadata)
         if self.fail:
             raise SpecialistError("unreachable at http://x")
         return SpecialistAnswer(f"answer\n\n_confidence: {self.confidence}_", self.confidence)
@@ -306,7 +310,7 @@ def test_the_model_is_told_what_is_shown_under_its_reply() -> None:
 async def test_reply_carries_the_specialists_tables(emitted: list) -> None:
     @dataclass
     class TableClient(StubClient):
-        async def ask(self, question: str, context_id: str | None = None) -> SpecialistAnswer:
+        async def ask(self, question: str, context_id=None, metadata=None) -> SpecialistAnswer:
             data = {
                 "confidence": "high",
                 "tables": [{"title": "T", "columns": ["a"], "rows": [["1"]]}],
@@ -317,3 +321,65 @@ async def test_reply_carries_the_specialists_tables(emitted: list) -> None:
     agent = build_agent(TestModel(call_tools=["ask_mt_agent"]), [mt])
     reply = await answer(agent, "IFA standings?")
     assert [t.title for t in reply.tables] == ["T"]
+
+
+# --- the signed-in MT user's token (SB-1529) ---------------------------------------------
+
+
+async def test_user_token_goes_only_to_specialists_that_declare_identity(emitted: list) -> None:
+    from sb_support.core import InboundMessage
+    from sb_support.specialists import IDENTITY_EXTENSION
+
+    mt_client, docs_client = StubClient(metadata=[]), StubClient(metadata=[])
+    mt = Specialist("mt-agent", "MT data.", mt_client, accepts_identity=True)
+    docs_agent = docs(docs_client)
+    msg = InboundMessage("mt-app", "c1", "how is my team?", user_id="u1", credential="tok-1")
+    for tool, specialists in [("ask_mt_agent", [mt]), ("ask_docs_agent", [docs_agent])]:
+        core = SupportCore(build_agent(TestModel(call_tools=[tool]), specialists))
+        await core.handle(msg)
+    assert mt_client.metadata == [{IDENTITY_EXTENSION: {"token": "tok-1"}}]
+    assert docs_client.metadata == [None]
+
+
+async def test_no_token_sends_no_identity(emitted: list) -> None:
+    from sb_support.core import InboundMessage
+
+    client = StubClient(metadata=[])
+    mt = Specialist("mt-agent", "MT data.", client, accepts_identity=True)
+    core = SupportCore(build_agent(TestModel(call_tools=["ask_mt_agent"]), [mt]))
+    await core.handle(InboundMessage("slack", "t1", "how is my team?", user_id="U1"))
+    assert client.metadata == [None]
+
+
+def test_token_is_not_in_the_message_or_deps_repr() -> None:
+    from sb_support.agent import SupportDeps
+    from sb_support.core import InboundMessage
+
+    assert "tok-1" not in repr(InboundMessage("mt-app", "c", "q", credential="tok-1"))
+    assert "tok-1" not in repr(SupportDeps(credential="tok-1"))
+
+
+async def test_specialist_client_sends_metadata_only_when_given() -> None:
+    from sb_support.specialists import SpecialistClient
+
+    sent: list[dict] = []
+
+    def reply(request: httpx.Request) -> httpx.Response:
+        import json as _json
+
+        sent.append(_json.loads(request.content)["params"])
+        return httpx.Response(200, json={"result": {"message": {"parts": [{"text": "ok"}]}}})
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(reply)) as http:
+        await SpecialistClient(BASE, http).ask("q", metadata={"k": {"token": "t"}})
+        await SpecialistClient(BASE, http).ask("q")
+    assert sent[0]["metadata"] == {"k": {"token": "t"}}
+    assert "metadata" not in sent[1]
+
+
+def test_card_extension_marks_a_specialist_as_taking_identity() -> None:
+    from sb_support.specialists import IDENTITY_EXTENSION, specialist_from_card
+
+    card = {"name": "mt-agent", "capabilities": {"extensions": [{"uri": IDENTITY_EXTENSION}]}}
+    assert specialist_from_card(card, BASE, None).accepts_identity
+    assert not specialist_from_card({"name": "docs-agent"}, BASE, None).accepts_identity

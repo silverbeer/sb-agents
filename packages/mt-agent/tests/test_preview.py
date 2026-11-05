@@ -159,4 +159,4 @@ async def test_through_the_agent_one_run_record_counts_the_writer(emitted: list)
 def test_preview_can_be_switched_off_for_the_baseline() -> None:
     agent = build_agent(scripted(), build_toolset(MCP_URL, "t"), preview=False)
     assert [getattr(t, "__name__", None) for t in agent.tools][1:] == []
-    assert "match_preview" not in agent.instruction
+    assert "match_preview" not in agent.instruction(None)

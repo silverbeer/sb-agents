@@ -6,7 +6,8 @@ MT's backend owns the user, their auth and the conversation record (`ai_messages
 it calls this with its service token and the MT conversation id, and stores the reply.
 
     POST /v1/chat   Authorization: Bearer $SB_SUPPORT_API_TOKEN
-        {"conversation_id": "<MT conversation uuid>", "user_id": "<MT user id>", "text": "..."}
+        {"conversation_id": "<MT conversation uuid>", "user_id": "<MT user id>", "text": "...",
+         "user_token": "<optional: the user's short-lived delegated MT token, SB-1529>"}
     →   {"text", "outcome", "escalation", "routed_to", "tables"}
 
     GET /healthz    no auth; specialists discovered at startup
@@ -43,6 +44,7 @@ CHANNEL = "mt-app"
 DEFAULT_HOST, DEFAULT_PORT = "127.0.0.1", 8103
 MAX_TEXT = 2000  # MT's own limit on a chat message
 MAX_ID = 128
+MAX_TOKEN = 4096
 
 
 def reply_body(reply: Reply) -> dict[str, Any]:
@@ -76,7 +78,10 @@ def parse_message(body: Any) -> InboundMessage | str:
         return "text is required"
     if len(text) > MAX_TEXT:
         return f"text is over {MAX_TEXT} characters"
-    return InboundMessage(CHANNEL, conversation_id, text.strip(), user_id=user_id)
+    token = body.get("user_token")
+    if token is not None and (not isinstance(token, str) or not 0 < len(token) <= MAX_TOKEN):
+        return "user_token must be a non-empty string"
+    return InboundMessage(CHANNEL, conversation_id, text.strip(), user_id=user_id, credential=token)
 
 
 def build_app(core: SupportCore | None = None, token: str | None = None) -> Starlette:

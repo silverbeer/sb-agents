@@ -39,6 +39,10 @@ A2A_VERSION = "1.0"
 # Others get none: fasta2a (docs-agent) would replay the whole history, tool results
 # included, for a reused context. Same URI as mt_agent.a2a_server.
 CONVERSATION_EXTENSION = "urn:sb-agents:a2a:conversation:v1"
+# A specialist that declares this answers as the signed-in MT user (SB-1529): it gets the
+# user's delegated token in params.metadata. Nobody else ever sees the token. Same URI as
+# mt_agent.identity.
+IDENTITY_EXTENSION = "urn:sb-agents:a2a:mt-identity:v1"
 FAILED_STATES = ("TASK_STATE_FAILED", "TASK_STATE_REJECTED", "TASK_STATE_CANCELED")
 
 
@@ -65,8 +69,14 @@ class SpecialistClient:
     http_client: httpx.AsyncClient | None = None
     timeout_s: float = 90.0
 
-    async def ask(self, question: str, context_id: str | None = None) -> SpecialistAnswer:
-        """`context_id`: reuse for follow-ups in one conversation; None = a new context."""
+    async def ask(
+        self,
+        question: str,
+        context_id: str | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> SpecialistAnswer:
+        """`context_id`: reuse for follow-ups in one conversation; None = a new context.
+        `metadata`: the request's params.metadata (may hold a credential: never log it)."""
         url = self.url.rstrip("/")
         http = self.http_client or traced_http_client(timeout=self.timeout_s)
         message: dict[str, Any] = {
@@ -82,6 +92,8 @@ class SpecialistClient:
             "method": "SendStreamingMessage",
             "params": {"message": message},
         }
+        if metadata:
+            request["params"]["metadata"] = metadata
         headers = {"A2A-Version": A2A_VERSION, "Accept": "text/event-stream"}
         answer = _Answer()
         try:
@@ -153,6 +165,13 @@ class Specialist:
     client: SpecialistClient
     examples: list[str] = field(default_factory=list)
     conversational: bool = False  # declares CONVERSATION_EXTENSION
+    accepts_identity: bool = False  # declares IDENTITY_EXTENSION
+
+    def identity(self, credential: str | None) -> dict[str, Any] | None:
+        """params.metadata carrying the user's token, only for a specialist that declares it."""
+        if not credential or not self.accepts_identity:
+            return None
+        return {IDENTITY_EXTENSION: {"token": credential}}
 
     def context_id(self, conversation_key: str | None) -> str | None:
         """Stable per (conversation, specialist), opaque: no channel or thread ids leak."""
@@ -184,6 +203,7 @@ def specialist_from_card(
         client=SpecialistClient(url, http),
         examples=examples,
         conversational=any(e.get("uri") == CONVERSATION_EXTENSION for e in extensions),
+        accepts_identity=any(e.get("uri") == IDENTITY_EXTENSION for e in extensions),
     )
 
 

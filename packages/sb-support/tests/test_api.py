@@ -111,3 +111,24 @@ async def test_slack_messages_still_get_slack_formatting() -> None:
     core = SupportCore(build_agent(FunctionModel(respond)), prefs=PreferenceStore(":memory:"))
     await core.handle(InboundMessage("slack", "t", "hi", user_id="U1"))
     assert SLACK_FORMAT in seen[0]
+
+
+def test_user_token_becomes_the_messages_credential() -> None:
+    msg = parse_message({"conversation_id": "c", "user_id": "u", "text": "q", "user_token": "t"})
+    assert isinstance(msg, InboundMessage) and msg.credential == "t"
+    assert "user_token" in parse_message({"conversation_id": "c", "text": "q", "user_token": ""})
+    assert "user_token" in parse_message({"conversation_id": "c", "text": "q", "user_token": 5})
+
+
+async def test_signed_in_user_keeps_my_team_for_mt_agent() -> None:
+    from sb_support.agent import SIGNED_IN
+
+    seen: list[str] = []
+
+    def respond(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
+        seen.append(messages[-1].instructions or "")
+        return ModelResponse(parts=[TextPart("ok")])
+
+    core = SupportCore(build_agent(FunctionModel(respond)), prefs=PreferenceStore(":memory:"))
+    await core.handle(InboundMessage("mt-app", "c", "my team?", user_id="u", credential="t"))
+    assert SIGNED_IN in seen[0]

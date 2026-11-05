@@ -66,9 +66,17 @@ def channel_instructions(ctx: RunContext[SupportDeps]) -> str:
     return MT_APP_FORMAT if ctx.deps.channel == "mt-app" else SLACK_FORMAT
 
 
+SIGNED_IN = (
+    "This user is signed in to MissingTable, and mt-agent knows their team. When they say "
+    '"my team", "we" or "us", keep those words in the question you send mt-agent.'
+)
+
+
 def my_team_instructions(ctx: RunContext[SupportDeps]) -> str:
     """The user's saved team, so "how's my team?" needs no follow-up question (SB-1564)."""
     deps = ctx.deps
+    if deps.credential:
+        return SIGNED_IN
     if deps.prefs is None or not deps.user_id:
         return NO_USER
     team = deps.prefs.my_team(deps.channel, deps.user_id)
@@ -99,6 +107,7 @@ class SupportDeps:
     channel: str = "direct"
     user_id: str | None = None  # the channel's user id; keys the user's preferences
     prefs: PreferenceStore | None = None
+    credential: str | None = field(default=None, repr=False)  # delegated MT token (SB-1529)
 
     @property
     def routed_to(self) -> list[str]:
@@ -147,7 +156,9 @@ def specialist_tool(specialist: Specialist) -> Tool[SupportDeps]:
         trace.get_current_span().set_attribute("sb.routed_to", specialist.name)
         try:
             context_id = specialist.context_id(ctx.deps.conversation_key)
-            answer = await specialist.client.ask(question, context_id=context_id)
+            answer = await specialist.client.ask(
+                question, context_id=context_id, metadata=specialist.identity(ctx.deps.credential)
+            )
         except SpecialistError as exc:
             # Returned, not raised: the model can still reply ("docs are unavailable"), and
             # the failed call triggers escalation. A retry would just fail again.

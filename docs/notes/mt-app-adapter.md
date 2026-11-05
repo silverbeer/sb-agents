@@ -27,7 +27,8 @@ Reply (`200` even when answering failed: failure is an `outcome`):
  "tables": [{"title": "...", "columns": [], "rows": [], "notes": [], "highlight": []}]}
 ```
 
-`401` wrong/missing token, `400` bad body. `GET /healthz` has no auth.
+Optional `"user_token"`: the user's short-lived delegated MT token (SB-1529), forwarded
+only to mt-agent; see mt-agent.md "Phase 2". `401` wrong/missing token, `400` bad body. `GET /healthz` has no auth.
 
 - **Channel `mt-app`:** RunRecord `caller = mt-app`; memory keyed `mt-app:<conversation id>`
   (in process, lost on restart; MT keeps the durable record). The model writes plain
@@ -48,5 +49,4 @@ MT): not decided, and MT's flag stays off in prod until it is.
 ## Not yet
 
 - Token streaming: SB-1565 (the web chat shows a thinking state, then the reply).
-- Answers for the signed-in user ("my team" via MT identity): SB-1529.
 - docs-agent's user audience: SB-1494 (until then docs answers are developer-flavoured).

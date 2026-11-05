@@ -34,6 +34,7 @@ from google.adk.events import Event
 from google.adk.runners import Runner
 from google.genai import types
 
+from mt_agent.identity import USER_TOKEN
 from mt_agent.sessions import BoundedSessionService
 from mt_agent.tables import tables_from
 from sb_obs import RunHandle, price, track_run
@@ -200,5 +201,6 @@ class TrackedRunner(Runner):
                 raise UsageLimitExceeded(str(exc)) from exc
             finally:
                 CURRENT_RUN.reset(token)
+                USER_TOKEN.set(None)  # this request's identity ends with it (SB-1529)
                 run.add_usage(tool_calls=len(ledger.calls))
                 self.last_usage = dict(run.usage)
