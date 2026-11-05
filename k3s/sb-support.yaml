@@ -60,6 +60,24 @@ spec:
         - {name: SB_ENV, value: homelab}
         - {name: SB_OBS_CAPTURE_CONTENT, value: "1"}
         - {name: SB_SUPPORT_SPECIALISTS, value: "http://docs-agent.sb-agents.svc.cluster.local:8101,http://mt-agent.sb-agents.svc.cluster.local:8102"}
+        # Users' saved "my team" (SB-1564): survives restarts on the PVC below.
+        - {name: SB_SUPPORT_DB, value: /data/sb-support.db}
+        volumeMounts:
+        - {name: data, mountPath: /data}
         resources:
           requests: {cpu: 50m, memory: 192Mi}
           limits: {memory: 768Mi}
+      volumes:
+      - name: data
+        persistentVolumeClaim: {claimName: sb-support-data}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: sb-support-data
+  namespace: sb-agents
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: local-path
+  resources:
+    requests: {storage: 64Mi}

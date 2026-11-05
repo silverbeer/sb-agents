@@ -12,6 +12,7 @@ from pydantic_ai.models import Model
 from pydantic_ai.usage import UsageLimits
 from sb_models import resolve
 
+from sb_support.prefs import PreferenceStore
 from sb_support.specialists import Specialist, SpecialistError
 from sb_support.tables import Table, parse_tables
 
@@ -40,7 +41,30 @@ You are sb-agent, the support assistant for silverbeer (SB) projects, answering 
 - If no specialist fits, or one fails or doesn't know, say so plainly. A human will be
   pulled in automatically; don't promise anything on their behalf.
 - Be brief and concrete. Use Slack mrkdwn (*bold*, `code`), not Markdown headings.
+- "My team is X" / "remember my team is X": call remember_my_team with X in their words,
+  then confirm in one line. "Forget my team": call forget_my_team.
 """
+
+NO_USER = "You can't save a team for this user; if asked, say saving a team isn't available here."
+NO_TEAM = (
+    'This user has no saved team. If they say "my team", "we" or "us" about a team, '
+    'ask which team they mean, and offer to remember it ("my team is IFA Homegrown U15").'
+)
+
+
+def my_team_instructions(ctx: RunContext[SupportDeps]) -> str:
+    """The user's saved team, so "how's my team?" needs no follow-up question (SB-1564)."""
+    deps = ctx.deps
+    if deps.prefs is None or not deps.user_id:
+        return NO_USER
+    team = deps.prefs.my_team(deps.channel, deps.user_id)
+    if not team:
+        return NO_TEAM
+    return (
+        f'This user\'s saved team is: {team}. When they say "my team", "we" or "us" '
+        "about a team, put that team's name in the question you send a specialist instead, "
+        "in those words. If they name a different team, use the one they name."
+    )
 
 
 @dataclass
@@ -58,6 +82,9 @@ class SupportDeps:
 
     calls: list[SpecialistCall] = field(default_factory=list)
     conversation_key: str | None = None  # "slack:<thread>": scopes specialist contexts
+    channel: str = "direct"
+    user_id: str | None = None  # the channel's user id; keys the user's preferences
+    prefs: PreferenceStore | None = None
 
     @property
     def routed_to(self) -> list[str]:
@@ -124,6 +151,34 @@ def specialist_tool(specialist: Specialist) -> Tool[SupportDeps]:
     )
 
 
+async def remember_my_team(ctx: RunContext[SupportDeps], team: str) -> str:
+    """Save the user's team, used whenever they later say "my team", "we" or "us".
+
+    Args:
+        team: the team in the user's words, with club, league and age group when given,
+            e.g. "IFA Homegrown U15".
+    """
+    deps = ctx.deps
+    if deps.prefs is None or not deps.user_id:
+        return "Saving a team isn't available here."
+    try:
+        saved = deps.prefs.set_my_team(deps.channel, deps.user_id, team)
+    except ValueError:
+        return "No team given: ask which team to save."
+    log.info("my team saved", extra={"channel": deps.channel})
+    return f"Saved: {saved}."
+
+
+async def forget_my_team(ctx: RunContext[SupportDeps]) -> str:
+    """Clear the user's saved team."""
+    deps = ctx.deps
+    if deps.prefs is None or not deps.user_id:
+        return "Saving a team isn't available here."
+    if deps.prefs.forget_my_team(deps.channel, deps.user_id):
+        return "Forgotten."
+    return "No team was saved."
+
+
 def build_agent(
     model: Model | str | None = None, specialists: list[Specialist] | None = None
 ) -> Agent[SupportDeps, str]:
@@ -131,7 +186,11 @@ def build_agent(
     return Agent(
         model or resolve("sb-support", check_credentials=False).ref,
         deps_type=SupportDeps,
-        instructions=INSTRUCTIONS,
+        instructions=[INSTRUCTIONS, my_team_instructions],
         name="sb-support",
-        tools=[specialist_tool(s) for s in specialists or []],
+        tools=[
+            *(specialist_tool(s) for s in specialists or []),
+            Tool(remember_my_team, takes_ctx=True),
+            Tool(forget_my_team, takes_ctx=True),
+        ],
     )

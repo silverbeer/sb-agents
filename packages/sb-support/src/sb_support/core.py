@@ -22,6 +22,7 @@ from pydantic_ai.messages import ModelMessage
 
 from sb_obs import track_run
 from sb_support.agent import USAGE_LIMITS, SupportDeps
+from sb_support.prefs import PreferenceStore
 from sb_support.tables import Table
 
 log = logging.getLogger("sb_support")
@@ -94,12 +95,14 @@ async def answer(
     memory: ConversationMemory | None = None,
     key: str | None = None,
     caller: str = "direct",
+    user_id: str | None = None,
+    prefs: PreferenceStore | None = None,
 ) -> Reply:
     """Run under usage limits with the conversation's history; emit a RunRecord.
 
     Raises `UsageLimitExceeded` and any agent error; `SupportCore.handle` maps them.
     """
-    deps = SupportDeps(conversation_key=key)
+    deps = SupportDeps(conversation_key=key, channel=caller, user_id=user_id, prefs=prefs)
     history = memory.history(key) if memory is not None and key else []
     with track_run("sb-support", caller=caller, model=agent.model) as run:
         try:
@@ -129,10 +132,14 @@ class SupportCore:
     """The front door every channel adapter calls."""
 
     def __init__(
-        self, agent: Agent[SupportDeps, str], memory: ConversationMemory | None = None
+        self,
+        agent: Agent[SupportDeps, str],
+        memory: ConversationMemory | None = None,
+        prefs: PreferenceStore | None = None,
     ) -> None:
         self.agent = agent
         self.memory = memory if memory is not None else ConversationMemory()
+        self.prefs = prefs if prefs is not None else PreferenceStore()
 
     def knows(self, channel: str, conversation_id: str) -> bool:
         """True once we've answered in this conversation (adapters use it for follow-ups)."""
@@ -157,7 +164,13 @@ class SupportCore:
             else:
                 try:
                     reply = await answer(
-                        self.agent, msg.text, self.memory, msg.conversation_key, msg.channel
+                        self.agent,
+                        msg.text,
+                        self.memory,
+                        msg.conversation_key,
+                        msg.channel,
+                        user_id=msg.user_id,
+                        prefs=self.prefs,
                     )
                 except UsageLimitExceeded:
                     reply = Reply(LIMIT_TEXT, "limit")

@@ -76,3 +76,17 @@ on-call phrasings, high on an answerable question, 14/14 evals ($0.069).
 - Live: "how do I install janitor?" then "and how do I verify that worked?" got `jt --help`
   / `jt doctor` from the thread's earlier docs-agent answer (both in the README) without
   a second A2A call.
+
+## "My team" (SB-1564)
+
+Slack users have no MT identity (SB-1529 covers the MT app only), so mt-agent can't
+answer "how's my team?" on its own. sb-support keeps a per-user preference instead:
+
+- "my team is IFA Homegrown U15" → tool `remember_my_team`, stored in SQLite
+  (`sb_support.prefs`, `SB_SUPPORT_DB`; on k3s a 64Mi `local-path` PVC at `/data`),
+  keyed `(channel, user_id)`. "forget my team" → `forget_my_team`.
+- Every run gets a dynamic instruction with the asking user's saved team (or "none
+  saved: ask, and offer to remember it"). The model puts the team's name into the
+  self-contained question it sends mt-agent, so mt-agent never sees "my team" and
+  needs no identity. Public data only: the text is never a credential.
+- No user id (a channel that doesn't give one) → saving isn't offered.
