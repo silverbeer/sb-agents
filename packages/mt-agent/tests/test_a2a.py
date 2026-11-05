@@ -226,5 +226,5 @@ async def test_standings_table_survives_the_a2a_data_part() -> None:
 
     [table] = parse_tables(answer.data)
     assert table.title == "U14 Homegrown Northeast · 18 of 42 matches played"
-    assert table.rows == [["1 ▲2", "IFA", "6", "5", "0", "1", "+9", "15", "🟩🟩🟩🟥🟩"]]
+    assert table.rows == [["1 ▲2", "IFA", "6", "5", "0", "1", "+9", "15", "🟩 🟩 🟩 🟥 🟩"]]
     assert table.notes == ["Biggest climb since the last match day: **IFA**, up 2."]
