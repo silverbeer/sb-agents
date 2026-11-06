@@ -41,10 +41,14 @@ only to mt-agent; see mt-agent.md "Phase 2". `401` wrong/missing token, `400` ba
 
 ## Reaching it
 
-ClusterIP only. MT's local backend reaches it with
-`kubectl -n sb-agents port-forward svc/sb-support-api 8103`. MT prod runs on LKE, so
-production needs a path from LKE to the homelab (tunnel, or running sb-agents next to
-MT): not decided, and MT's flag stays off in prod until it is.
+ClusterIP only, in both places it runs:
+
+- **Prod (LKE, SB-1570):** sb-support-api, mt-agent and a public-docs docs-agent run
+  next to MT, so MT's backend calls
+  `http://sb-support-api.sb-agents.svc.cluster.local:8103` in-cluster. Nothing is
+  exposed to the internet. Runbook: [deploy-lke.md](deploy-lke.md).
+- **Homelab (k3s):** MT's local backend reaches it with
+  `kubectl -n sb-agents port-forward svc/sb-support-api 8103`.
 
 ## Not yet
 

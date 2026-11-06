@@ -1,0 +1,42 @@
+# sb-agents on prod LKE (SB-1570). ArgoCD app `sb-agents` syncs this chart;
+# the Application itself is Terraform (missingtable-platform-bootstrap).
+# Design and runbook: docs/notes/deploy-lke.md.
+
+image:
+  repository: ghcr.io/silverbeer/sb-agents
+  tag: "IMAGE_TAG" # image-tag
+  pullPolicy: IfNotPresent
+
+# SB_ENV tags logs and traces. No OTLP exporter here: the homelab collector is
+# not reachable from LKE, and minors' chat content must not leave the cluster.
+env: prod
+
+# Shares one node with MT prod. Lower priority than MT's pods (priority 0), so
+# under memory pressure the kubelet evicts sb-agents first; never preempts.
+priorityClass:
+  name: sb-agents-low
+  value: -100
+
+# Idle working set is 140-230Mi per pod (homelab, 2026-11). Limits sized to
+# that, not to the homelab's 768Mi: three pods at their limit still fit the
+# node's free memory.
+resources:
+  requests: {cpu: 50m, memory: 160Mi}
+  limits: {memory: 384Mi}
+
+# AWS Secrets Manager `missing-table-app-secrets` (ESO's IAM policy already
+# covers it). Properties are set by helm/sb-agents/set-aws-secret.sh.
+externalSecret:
+  storeName: aws-secrets-manager
+  awsSecretName: missing-table-app-secrets
+
+docsAgent:
+  # Public repos only: prod answers MT app users, so private repos' docs
+  # (dotfiles, trd, ...) never enter this corpus. Shallow-cloned at pod start;
+  # restart the pod to pick up doc changes.
+  repos:
+    - missing-table
+
+mtAgent:
+  # Public URL, as on the homelab: mt-mcp is validated end to end there.
+  mcpUrl: https://api.missingtable.com/mcp/

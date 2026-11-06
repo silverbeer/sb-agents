@@ -1,0 +1,126 @@
+# mt-agent and docs-agent: A2A specialists behind sb-support-api.
+# TCP probes, not GET /.well-known/agent-card.json: every HTTP probe becomes a trace.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mt-agent
+  labels:
+    app: mt-agent
+    {{- include "sb-agents.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  revisionHistoryLimit: 3
+  selector:
+    matchLabels: {app: mt-agent}
+  template:
+    metadata:
+      labels: {app: mt-agent}
+    spec:
+      {{- include "sb-agents.podCommon" . | nindent 6 }}
+      containers:
+      - name: mt-agent
+        image: {{ include "sb-agents.image" . }}
+        imagePullPolicy: {{ .Values.image.pullPolicy }}
+        command: [mt-agent-a2a]
+        ports:
+        - {name: a2a, containerPort: 8102}
+        env:
+        {{- include "sb-agents.commonEnv" . | nindent 8 }}
+        - name: MT_AGENT_MCP_TOKEN
+          valueFrom: {secretKeyRef: {name: sb-agents, key: MT_AGENT_MCP_TOKEN}}
+        - {name: MT_MCP_URL, value: {{ .Values.mtAgent.mcpUrl | quote }}}
+        - {name: MT_AGENT_HOST, value: 0.0.0.0}
+        - {name: MT_AGENT_A2A_URL, value: "http://mt-agent.{{ .Release.Namespace }}.svc.cluster.local:8102"}
+        readinessProbe:
+          tcpSocket: {port: a2a}
+          periodSeconds: 10
+        livenessProbe:
+          tcpSocket: {port: a2a}
+          initialDelaySeconds: 30
+          periodSeconds: 30
+        resources:
+          {{- toYaml .Values.resources | nindent 10 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mt-agent
+  labels:
+    {{- include "sb-agents.labels" . | nindent 4 }}
+spec:
+  selector: {app: mt-agent}
+  ports:
+  - {name: a2a, port: 8102, targetPort: a2a}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: docs-agent
+  labels:
+    app: docs-agent
+    {{- include "sb-agents.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  revisionHistoryLimit: 3
+  selector:
+    matchLabels: {app: docs-agent}
+  template:
+    metadata:
+      labels: {app: docs-agent}
+    spec:
+      {{- include "sb-agents.podCommon" . | nindent 6 }}
+      # The corpus: a shallow clone of each public repo, made at pod start.
+      # docs-agent reads only git-tracked markdown and skips repos it can't find.
+      initContainers:
+      - name: clone-docs
+        image: {{ include "sb-agents.image" . }}
+        imagePullPolicy: {{ .Values.image.pullPolicy }}
+        command:
+        - sh
+        - -ec
+        - |
+          for repo in {{ join " " .Values.docsAgent.repos }}; do
+            git clone --quiet --depth 1 --single-branch "https://github.com/silverbeer/$repo.git" "/gitrepos/$repo"
+          done
+        volumeMounts:
+        - {name: gitrepos, mountPath: /gitrepos}
+        resources:
+          requests: {cpu: 10m, memory: 64Mi}
+          limits: {memory: 256Mi}
+      containers:
+      - name: docs-agent
+        image: {{ include "sb-agents.image" . }}
+        imagePullPolicy: {{ .Values.image.pullPolicy }}
+        command: [docs-agent-a2a]
+        ports:
+        - {name: a2a, containerPort: 8101}
+        env:
+        {{- include "sb-agents.commonEnv" . | nindent 8 }}
+        - {name: DOCS_AGENT_A2A_HOST, value: 0.0.0.0}
+        - {name: DOCS_AGENT_A2A_URL, value: "http://docs-agent.{{ .Release.Namespace }}.svc.cluster.local:8101"}
+        - {name: DOCS_AGENT_ROOT, value: /gitrepos}
+        readinessProbe:
+          tcpSocket: {port: a2a}
+          periodSeconds: 10
+        livenessProbe:
+          tcpSocket: {port: a2a}
+          initialDelaySeconds: 30
+          periodSeconds: 30
+        resources:
+          {{- toYaml .Values.resources | nindent 10 }}
+        volumeMounts:
+        - {name: gitrepos, mountPath: /gitrepos, readOnly: true}
+      volumes:
+      - name: gitrepos
+        emptyDir: {sizeLimit: 512Mi}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: docs-agent
+  labels:
+    {{- include "sb-agents.labels" . | nindent 4 }}
+spec:
+  selector: {app: docs-agent}
+  ports:
+  - {name: a2a, port: 8101, targetPort: a2a}

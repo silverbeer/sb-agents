@@ -1,0 +1,8 @@
+apiVersion: v2
+name: sb-agents
+description: >-
+  The MT app chat path on prod LKE (SB-1570): sb-support-api, mt-agent and a
+  docs-agent over public docs only. Slack sb-support stays on the homelab (k3s/).
+type: application
+version: 0.1.0
+appVersion: "1"
