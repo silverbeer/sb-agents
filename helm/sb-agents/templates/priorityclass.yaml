@@ -1,0 +1,10 @@
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: {{ .Values.priorityClass.name }}
+  labels:
+    {{- include "sb-agents.labels" . | nindent 4 }}
+value: {{ .Values.priorityClass.value }}
+preemptionPolicy: Never
+globalDefault: false
+description: sb-agents shares the prod node with MT; evicted before MT, never preempts.

@@ -19,3 +19,49 @@ jobs:
       - run: uv run ruff check .
       - run: uv run ruff format --check .
       - run: uv run pytest -q
+
+  # Prod LKE image (SB-1570). The homelab builds its own (k3s/deploy.sh).
+  image:
+    needs: test
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build and push
+        run: |
+          TAG=$(echo "$GITHUB_SHA" | cut -c1-7)
+          docker build -t "ghcr.io/silverbeer/sb-agents:$TAG" .
+          docker push "ghcr.io/silverbeer/sb-agents:$TAG"
+
+  # GitOps: bump helm/sb-agents to the new tag; ArgoCD syncs it. Needs a GH_PAT
+  # repo secret (contents: write) to push past branch protection; without one
+  # this job is a no-op and the tag is bumped by PR (docs/notes/deploy-lke.md).
+  bump-tag:
+    needs: image
+    runs-on: ubuntu-latest
+    env:
+      GH_PAT: ${{ secrets.GH_PAT }}
+    steps:
+      - if: env.GH_PAT == ''
+        run: echo "No GH_PAT secret; bump helm/sb-agents/values.yaml by PR."
+      - if: env.GH_PAT != ''
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GH_PAT }}
+          ref: main
+      - if: env.GH_PAT != ''
+        run: |
+          TAG=$(echo "$GITHUB_SHA" | cut -c1-7)
+          sed -i "s|tag: \".*\" # image-tag|tag: \"$TAG\" # image-tag|" helm/sb-agents/values.yaml
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add helm/sb-agents/values.yaml
+          git diff --staged --quiet || { git commit -m "chore: sb-agents image $TAG [skip ci]"; git push; }

@@ -3,6 +3,9 @@
 The always-on home for docs-agent, mt-agent and sb-support: Rancher Desktop's k3s on
 the Mac mini (context `rancher-desktop`), namespace `sb-agents`.
 
+The MT app chat path also runs on prod LKE (SB-1570): see [deploy-lke.md](deploy-lke.md).
+Slack sb-support, the full docs corpus and scheduled agents stay here.
+
 ```bash
 make deploy          # build image, provision secrets, roll out all three, prune old images
 make deploy-apply    # same, without the build (manifest or secret change)
