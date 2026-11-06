@@ -4,7 +4,7 @@
 
 image:
   repository: ghcr.io/silverbeer/sb-agents
-  tag: "IMAGE_TAG" # image-tag
+  tag: "c440fe1" # image-tag
   pullPolicy: IfNotPresent
 
 # SB_ENV tags logs and traces. No OTLP exporter here: the homelab collector is
