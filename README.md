@@ -20,6 +20,7 @@ uv workspace, one package per agent:
 | `packages/docs-agent` | PydanticAI + fasta2a | Answers from SB repo markdown docs, with citations and confidence; served over A2A |
 | `packages/adk-docs-client` | ADK | Router `LlmAgent` that delegates docs questions to docs-agent via `RemoteA2aAgent` |
 | `packages/mt-agent` | ADK + a2a-sdk (`to_a2a`) | Answers questions about MissingTable teams, matches and standings from mt-mcp tools; served over A2A, so sb-support reaches it like docs-agent |
+| `packages/motw-agent` | PydanticAI + slack-sdk | Weekly MissingTable Match of the Week suggestions: k3s CronJobs read mt-mcp candidates, write grounded blurbs + reasons, post to #mt-admin-picks for approval |
 | `packages/sb-obs` | OpenTelemetry | Shared `setup_telemetry(service)`: traces, metrics, GCP-format JSON logs |
 
 More agents (infra, change, ticket, triage) land as sibling packages.
@@ -104,6 +105,25 @@ SB_SUPPORT_SPECIALISTS=http://127.0.0.1:8101,http://127.0.0.1:8102 make support
 
 Design, reply contract and auth phases: [docs/notes/mt-agent.md](docs/notes/mt-agent.md).
 Routing, escalation and thread follow-ups: [docs/notes/sb-support-routing.md](docs/notes/sb-support-routing.md).
+
+## motw-agent (Match of the Week)
+
+```bash
+op run --env-file=.env.op --env-file=.env.mt.op -- uv run motw-agent suggest --dry-run
+make motw-eval                                # writer eval, real model (~$0.04)
+```
+
+| Env | Source |
+|---|---|
+| `SLACK_BOT_TOKEN` | `op://agents/sb-slack/bot-token` (same bot as sb-support) |
+| `ANTHROPIC_API_KEY` | `op://agents/anthropic_key/password` |
+| `MT_AGENT_MCP_TOKEN` | `op://agents/mt-agent/token` (read-only MT account) |
+| `MOTW_SLACK_CHANNEL` | #mt-admin-picks channel id |
+| `MOTW_APPROVERS` | comma-separated Slack user ids, @mentioned by the Thursday reminder |
+| `MOTW_AGENT_MODEL` | optional, default `anthropic:claude-haiku-5-5` |
+
+Tuesday suggestions and the Thursday reminder run as k3s CronJobs. Design, validator
+rules, eval results and deploy steps: [docs/notes/motw-agent.md](docs/notes/motw-agent.md).
 
 ## Observability
 

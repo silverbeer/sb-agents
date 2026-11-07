@@ -18,6 +18,7 @@ make deploy-apply    # same, without the build (manifest or secret change)
 | docs-agent | `docs-agent-a2a` | `docs-agent.sb-agents.svc:8101` | Mac's `~/gitrepos` mounted read-only at `/gitrepos` |
 | mt-agent | `mt-agent-a2a` | `mt-agent.sb-agents.svc:8102` | calls prod mt-mcp |
 | sb-support | `sb-support` | none | Slack Socket Mode: outbound only, no ingress |
+| motw-agent | CronJobs `motw-agent-suggest` / `-remind` | none | Tue/Thu, Eastern; applied only once ConfigMap `motw-agent` exists ([motw-agent.md](motw-agent.md)) |
 | sb-support-api | `sb-support-api` | `sb-support-api.sb-agents.svc:8103` | MT app adapter (SB-1500); bearer `sb-support-api-token` from `k3s/api-token.sh`; ClusterIP only |
 
 - **One image**, `sb-agents:<git sha>`, for all three (one uv workspace). ~550 MB

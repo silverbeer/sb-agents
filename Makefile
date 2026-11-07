@@ -10,7 +10,7 @@ OBS_ENV    := OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318 \
               SB_OBS_CAPTURE_CONTENT=$(or $(SB_OBS_CAPTURE_CONTENT),1) \
               PYDANTIC_AI_NO_BANNER=1
 
-.PHONY: obs-up obs-down obs-logs dashboards eval mt-eval routing-eval docs-a2a mt-a2a support ask adk-ask test lint deploy deploy-apply
+.PHONY: obs-up obs-down obs-logs dashboards eval mt-eval motw-eval routing-eval docs-a2a mt-a2a support ask adk-ask test lint deploy deploy-apply
 
 GRAFANA_DIR := $(CURDIR)/observability/grafana
 PROVISIONING := /otel-lgtm/grafana/conf/provisioning
@@ -72,6 +72,10 @@ eval:
 # mt-agent eval, ground truth read live from mt-mcp: ~$0.04 per run (SB-1493).
 mt-eval:
 	$(OBS_ENV) op run --env-file=.env.op --env-file=.env.mt.op -- uv run mt-agent-eval
+
+# motw-agent writer eval (SB-1545): 4 bait fixtures, Haiku writer + Sonnet judge, ~$0.04.
+motw-eval:
+	$(OBS_ENV) $(OP) uv run motw-agent-eval
 
 # sb-support routing eval (SB-1548): needs docs-agent and mt-agent running
 # (make docs-a2a, make mt-a2a, or SB_SUPPORT_SPECIALISTS). ~$0.05 per run.

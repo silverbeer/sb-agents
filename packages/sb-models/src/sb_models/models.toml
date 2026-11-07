@@ -53,6 +53,13 @@ needs = { tools = true }
 providers = ["anthropic"]
 providers_reason = "ADK agents are Claude-only until ADK lifts its LiteLLM cap (SB-1490)"
 
+[agents.motw-agent]
+# Writes Match of the Week blurbs + reasons from MT's facts; an output validator
+# rejects ungrounded reasons (docs/notes/motw-agent.md). Haiku until the eval says otherwise.
+model = "anthropic:claude-haiku-5-5"
+env = "MOTW_AGENT_MODEL"
+needs = { structured_output = true }
+
 [agents.adk-docs-client]
 model = "anthropic:claude-haiku-5-5"
 env = "ADK_MODEL"

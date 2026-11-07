@@ -1,0 +1,92 @@
+# Match of the Week (SB-1545): Tuesday suggestions, Thursday reminder, to #mt-admin-picks.
+# Applied by k3s/deploy.sh only once the ConfigMap motw-agent exists (channel + approvers):
+#   kubectl --context rancher-desktop -n sb-agents create configmap motw-agent \
+#     --from-literal=MOTW_SLACK_CHANNEL=C0... --from-literal=MOTW_APPROVERS=U0...
+# Secret motw-agent (Anthropic, Slack bot, MT read token) comes from k3s/provision-secret.sh.
+# docs/notes/motw-agent.md
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: motw-agent-suggest
+  namespace: sb-agents
+  labels: {app: motw-agent}
+spec:
+  schedule: "0 10 * * 2"  # Tue 10:00
+  timeZone: America/New_York
+  # The mini sleeps: a run missed by up to 6h still fires on wake.
+  startingDeadlineSeconds: 21600
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 2
+  failedJobsHistoryLimit: 2
+  jobTemplate:
+    spec:
+      backoffLimit: 0  # a retry would post twice; a failure is a note in the channel + logs
+      activeDeadlineSeconds: 600
+      ttlSecondsAfterFinished: 604800
+      template:
+        metadata:
+          labels: {app: motw-agent}
+        spec:
+          restartPolicy: Never
+          enableServiceLinks: false
+          hostAliases:
+          - ip: 192.168.5.2
+            hostnames: [host.lima.internal]
+          containers:
+          - name: motw-agent
+            image: sb-agents:IMAGE_TAG
+            imagePullPolicy: Never
+            command: [motw-agent, suggest]
+            envFrom:
+            - secretRef: {name: motw-agent}
+            - configMapRef: {name: motw-agent}
+            env:
+            - {name: OTEL_EXPORTER_OTLP_ENDPOINT, value: "http://host.lima.internal:4318"}
+            - {name: SB_ENV, value: homelab}
+            - {name: SB_OBS_CAPTURE_CONTENT, value: "1"}
+            resources:
+              requests: {cpu: 50m, memory: 128Mi}
+              limits: {memory: 512Mi}
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: motw-agent-remind
+  namespace: sb-agents
+  labels: {app: motw-agent}
+spec:
+  schedule: "0 18 * * 4"  # Thu 18:00
+  timeZone: America/New_York
+  startingDeadlineSeconds: 21600
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 2
+  failedJobsHistoryLimit: 2
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      activeDeadlineSeconds: 600
+      ttlSecondsAfterFinished: 604800
+      template:
+        metadata:
+          labels: {app: motw-agent}
+        spec:
+          restartPolicy: Never
+          enableServiceLinks: false
+          hostAliases:
+          - ip: 192.168.5.2
+            hostnames: [host.lima.internal]
+          containers:
+          - name: motw-agent
+            image: sb-agents:IMAGE_TAG
+            imagePullPolicy: Never
+            command: [motw-agent, remind]
+            envFrom:
+            - secretRef: {name: motw-agent}
+            - configMapRef: {name: motw-agent}
+            env:
+            - {name: OTEL_EXPORTER_OTLP_ENDPOINT, value: "http://host.lima.internal:4318"}
+            - {name: SB_ENV, value: homelab}
+            - {name: SB_OBS_CAPTURE_CONTENT, value: "1"}
+            resources:
+              requests: {cpu: 50m, memory: 128Mi}
+              limits: {memory: 512Mi}

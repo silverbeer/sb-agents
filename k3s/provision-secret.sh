@@ -18,6 +18,8 @@ SECRETS = {
     "docs-agent": ("ANTHROPIC_API_KEY", "OPENROUTER_API_KEY"),  # OpenRouter: SB-1490
     "mt-agent": ("ANTHROPIC_API_KEY", "MT_AGENT_MCP_TOKEN"),
     "sb-support": ("ANTHROPIC_API_KEY", "SLACK_BOT_TOKEN", "SLACK_APP_TOKEN"),
+    # CronJobs (SB-1545): writes drafts, posts to Slack, reads MT as mt-agent's account.
+    "motw-agent": ("ANTHROPIC_API_KEY", "SLACK_BOT_TOKEN", "MT_AGENT_MCP_TOKEN"),
 }
 keys = {k for ks in SECRETS.values() for k in ks}
 missing = sorted(k for k in keys if not os.environ.get(k, "").strip() or os.environ[k].startswith("op://"))
