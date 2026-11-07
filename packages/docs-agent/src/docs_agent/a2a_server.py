@@ -20,9 +20,11 @@ from fasta2a.pydantic_ai import AgentWorker, worker_lifespan
 from fasta2a.schema import Artifact, Message, Part, Skill, Task, TaskSendParams, TaskState
 from fasta2a.storage import InMemoryStorage
 from pydantic_ai import Agent
+from pydantic_ai.exceptions import UsageLimitExceeded
+from pydantic_ai.messages import ModelMessage
 from sb_models import ModelConfigError, resolve
 
-from docs_agent.agent import Deps, DocsAnswer, WithDeps, build_agent
+from docs_agent.agent import Deps, DocsAnswer, WithDeps, build_agent, over_budget_answer
 from docs_agent.corpus import Corpus, KeywordRetriever
 from sb_obs import instrument_asgi, setup_telemetry
 
@@ -64,6 +66,25 @@ class UtcStorage(InMemoryStorage):
         return self._stamp(await super().update_task(task_id, state, new_artifacts, new_messages))
 
 
+@dataclass
+class OverBudget:
+    """Stands in for an AgentRunResult when a run exceeds its usage limits (SB-1572).
+
+    The task then completes with a low-confidence answer instead of failing, so the
+    caller (sb-support, Slack, the MT app) relays "couldn't answer" rather than an
+    error. The history is left as it was: the over-budget run adds nothing to it.
+    """
+
+    history: list[ModelMessage]
+    output: DocsAnswer = field(default_factory=over_budget_answer)
+
+    def all_messages(self) -> list[ModelMessage]:
+        return self.history
+
+    def new_messages(self) -> list[ModelMessage]:
+        return []
+
+
 def render_text(answer: DocsAnswer) -> str:
     """Human/LLM-readable form of a DocsAnswer (Slack mrkdwn-friendly)."""
     lines = [answer.answer, "", f"_confidence: {answer.confidence}_"]
@@ -85,6 +106,8 @@ class SpecAgentWorker(AgentWorker):
        broker, which drops it: the server logs nothing and ADK shows an empty event.
     3. The result artifact carries a text part as well as the data part. ADK turns a
        data part into base64 `inline_data`, which neither an LLM nor Slack can read.
+    4. A run over its usage limits completes with a low-confidence "couldn't answer"
+       (`OverBudget`) instead of failing the task (SB-1572).
 
     `stream` defaults to False: docs-agent's streamed "text" is its JSON output being
     written, which is noise to a client. Agents with prose output can enable it.
@@ -105,6 +128,15 @@ class SpecAgentWorker(AgentWorker):
         except Exception:
             log.exception("A2A task %s failed", params.get("id"))
             raise
+
+    async def _run_agent(
+        self, task_id: str, context_id: str, artifact_id: str, message_history: list[ModelMessage]
+    ) -> tuple[Any, bool]:
+        try:
+            return await super()._run_agent(task_id, context_id, artifact_id, message_history)
+        except UsageLimitExceeded as exc:
+            log.warning("A2A task %s over budget: %s", task_id, exc)
+            return OverBudget(list(message_history)), False
 
     async def publish_artifact(
         self,

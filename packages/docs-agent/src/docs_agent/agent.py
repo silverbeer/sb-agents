@@ -31,6 +31,32 @@ USAGE_LIMITS = UsageLimits(
     cost_limit=Decimal("0.02"),
 )
 
+# Past this many tokens the tools stop fetching and tell the model to answer (SB-1572):
+# a broad question that keeps reading long docs otherwise runs into the hard cap above
+# and the asker gets nothing. Each request re-sends the whole history, so the run keeps
+# growing after the cut-off. Measured on the SB-1572 question with research notes
+# indexed: 60k let one run reach 76k; at 40k six runs peaked at 56k.
+SOFT_TOKEN_BUDGET = 40_000
+BUDGET_NOTE = (
+    "Token budget nearly spent: stop searching and reading. Answer now from what you "
+    "have already read; if it is not enough, say so and set confidence to low."
+)
+
+# What the asker gets when a run still exceeds USAGE_LIMITS: an answer, never an error.
+OVER_BUDGET = (
+    "I couldn't answer that from the docs within my budget for one question. "
+    "Try a narrower question, e.g. one team, one competition or one step."
+)
+
+
+def over_budget_answer() -> DocsAnswer:
+    return DocsAnswer(answer=OVER_BUDGET, sources=[], confidence="low")
+
+
+def over_soft_budget(ctx: RunContext[Deps]) -> bool:
+    return ctx.usage.total_tokens >= SOFT_TOKEN_BUDGET
+
+
 INSTRUCTIONS = """\
 You answer questions about silverbeer (SB) software projects using ONLY their docs.
 
@@ -95,14 +121,18 @@ def build_agent(model: Model | str | None = None) -> Agent[Deps, DocsAnswer]:
     )
 
     @agent.tool
-    def search_docs(ctx: RunContext[Deps], query: str, limit: int = 8) -> list[dict[str, object]]:
+    def search_docs(
+        ctx: RunContext[Deps], query: str, limit: int = 8
+    ) -> list[dict[str, object]] | str:
         """Keyword search across all SB repo docs. Returns ranked sections with snippets.
 
         Args:
             query: keywords, e.g. "match-scraper queue failure retry".
-            limit: max results (1-15).
+            limit: max results (1-10).
         """
-        hits = ctx.deps.retriever.search(query, max(1, min(limit, 15)))
+        if over_soft_budget(ctx):
+            return BUDGET_NOTE
+        hits = ctx.deps.retriever.search(query, max(1, min(limit, 10)))
         return [
             {
                 "ref": h.section.ref,
@@ -121,6 +151,8 @@ def build_agent(model: Model | str | None = None) -> Agent[Deps, DocsAnswer]:
             ref: repo/path exactly as returned by search_docs.
             heading: optional section heading to read only that section.
         """
+        if over_soft_budget(ctx):
+            return BUDGET_NOTE
         try:
             return ctx.deps.corpus.read(ref, heading)
         except KeyError as e:

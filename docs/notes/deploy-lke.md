@@ -24,6 +24,7 @@ scheduled agents. Nothing is removed there.
   A second node (~$24/mo) is the fallback if evictions show up.
 - **Public docs only.** Prod answers MT app users, so private repos' markdown never
   enters this corpus. Doc changes need a pod restart (the clone is made at start).
+  Raw research notes (`*/docs/research/*`) are indexed out by default (SB-1572).
 - **No traces.** No OTLP exporter: the homelab collector isn't reachable, and chat
   content (minors' data) must not leave the cluster. Logs only.
 - **No preferences store.** MT app users are signed in; "my team" comes from their MT
