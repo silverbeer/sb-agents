@@ -79,6 +79,9 @@ while working, replies in thread, then ✅ (or ❌ on failure).
 | `SB_SUPPORT_MODEL` | optional, default `anthropic:claude-haiku-5-5` |
 | `SB_SUPPORT_SPECIALISTS` | optional, comma-separated A2A base URLs, default `http://127.0.0.1:8101` (docs-agent) |
 | `SB_SUPPORT_ESCALATE_TO` | optional Slack user ID to @mention when escalating |
+| `MOTW_APPROVERS` | Slack user IDs allowed to approve Match of the Week picks (comma-separated; empty = nobody) |
+| `MOTW_SLACK_CHANNEL` | #mt-admin-picks channel ID: MOTW thread replies are read only there |
+| `MT_MOTW_TOKEN` | `op://agents/mt-motw-agent/token` via `.env.motw.op`: MT write token for MOTW picks (`manage_motw` only) |
 
 ## A2A hop (ADK → docs-agent)
 

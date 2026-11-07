@@ -55,7 +55,12 @@ spec:
         command: [sb-support]
         envFrom:
         - secretRef: {name: sb-support}
+        # MOTW approval (SB-1546): picks channel + approvers, shared with motw-agent.
+        - configMapRef: {name: motw-agent, optional: true}
         env:
+        # Write token for MOTW picks; absent until k3s/motw-token.sh finds it in 1Password.
+        - name: MT_MOTW_TOKEN
+          valueFrom: {secretKeyRef: {name: motw-writer, key: MT_MOTW_TOKEN, optional: true}}
         - {name: OTEL_EXPORTER_OTLP_ENDPOINT, value: "http://host.lima.internal:4318"}
         - {name: SB_ENV, value: homelab}
         - {name: SB_OBS_CAPTURE_CONTENT, value: "1"}

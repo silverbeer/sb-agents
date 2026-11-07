@@ -91,6 +91,14 @@ on-call phrasings, high on an answerable question, 14/14 evals ($0.069).
   / `jt doctor` from the thread's earlier docs-agent answer (both in the README) without
   a second A2A call.
 
+## MOTW approval threads never reach the model (SB-1546)
+
+Replies in a Match of the Week suggestion thread (#mt-admin-picks) are checked before
+routing: `slack_motw.MotwSlack.on_thread_reply` claims any human reply whose parent
+message carries `motw_suggestion` metadata, and answers it with a fixed grammar (or
+ignores it). Only messages it doesn't claim go on to the core. Buttons are Bolt
+`block_actions` handlers. Flow and grammar: [motw-agent.md](motw-agent.md).
+
 ## "My team" (SB-1564)
 
 Slack users have no MT identity (SB-1529 covers the MT app only), so mt-agent can't
