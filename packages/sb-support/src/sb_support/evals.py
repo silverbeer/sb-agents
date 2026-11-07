@@ -43,6 +43,7 @@ CASES = [
     case("standings", "What are the U14 HG standings in the Northeast?", "mt-agent"),
     case("next-game", "When does IFA U15 play next?", "mt-agent"),
     case("flex-conference", "Which Flex conference is IFA U15 in?", "mt-agent"),
+    case("live-score", "What's the score of the IFA U15 HG match? Who scored?", "mt-agent"),
     # A team against the rule: both.
     case(
         "team-qualify",

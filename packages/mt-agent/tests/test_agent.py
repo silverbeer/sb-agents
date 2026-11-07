@@ -167,6 +167,7 @@ def test_non_anthropic_model_is_refused_with_the_reason(monkeypatch: pytest.Monk
         "list_divisions",
         "get_upcoming_matches",
         "get_recent_results",
+        "get_live_match",
         "get_standings",
     )
 
