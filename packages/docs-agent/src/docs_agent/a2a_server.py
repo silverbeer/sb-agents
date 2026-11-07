@@ -34,7 +34,9 @@ DEFAULT_HOST, DEFAULT_PORT = "127.0.0.1", 8101
 
 DESCRIPTION = (
     "Answers questions about silverbeer (SB) projects (missing-table, match-scraper, "
-    "myrunstreak, trd, bet, cycle-runner, dotfiles, janitor, ...) from their markdown docs. "
+    "myrunstreak, trd, bet, cycle-runner, dotfiles, janitor, ...) from their markdown docs, "
+    "including how MissingTable works and the rules it documents: MLS NEXT competition "
+    "formats and qualification (MLS NEXT Cup, Flex, Fest, divisions, tiebreakers). "
     "Returns an answer, the source files cited, and a confidence level."
 )
 
@@ -196,6 +198,7 @@ def build_app(
                 examples=[
                     "How do I deploy missing-table to production?",
                     "Which 1Password vault can agents read?",
+                    "Does playing at MLS NEXT Fest qualify a team for MLS NEXT Cup?",
                 ],
                 input_modes=["text/plain"],
                 output_modes=["text/plain", "application/json"],
