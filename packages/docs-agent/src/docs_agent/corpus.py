@@ -6,6 +6,8 @@ Only git-tracked `*.md` files are indexed, so vendored and generated files
 
 from __future__ import annotations
 
+import fnmatch
+import hashlib
 import math
 import os
 import re
@@ -28,6 +30,17 @@ DEFAULT_REPOS: tuple[str, ...] = (
     "janitor",
     "qualityplaybook.dev",
 )
+
+# Indexed out by default (SB-1572): raw research notes and the prompts that produced
+# them. They are long, overlap the curated docs distilled from them, and one broad
+# question reading two of them in full blew the run's token budget.
+# DOCS_AGENT_EXCLUDE (comma-separated globs over "repo/path") replaces this; "" = none.
+DEFAULT_EXCLUDE: tuple[str, ...] = ("*/docs/research/*",)
+
+# A whole-file read returns at most this much, then the file's section headings, so
+# the model reads the part it needs instead of a whole long file. Every read stays in
+# the run's history and is re-sent on each later request.
+READ_MAX_CHARS = 6_000
 
 HEADING_RE = re.compile(r"^(#{1,3})\s+(.+?)\s*#*\s*$")
 TOKEN_RE = re.compile(r"[a-z0-9][a-z0-9_\-.]*[a-z0-9]|[a-z0-9]")
@@ -102,8 +115,15 @@ class Corpus:
     files: dict[str, str] = field(default_factory=dict)  # ref -> full markdown
 
     @classmethod
-    def load(cls, root: Path | None = None, repos: tuple[str, ...] = DEFAULT_REPOS) -> Corpus:
+    def load(
+        cls,
+        root: Path | None = None,
+        repos: tuple[str, ...] = DEFAULT_REPOS,
+        exclude: tuple[str, ...] | None = None,
+    ) -> Corpus:
         root = root or Path(os.environ.get("DOCS_AGENT_ROOT", Path.home() / "gitrepos"))
+        if exclude is None:
+            exclude = exclude_from_env()
         sections: list[Section] = []
         files: dict[str, str] = {}
         for repo in repos:
@@ -111,6 +131,8 @@ class Corpus:
             if not (repo_dir / ".git").exists():
                 continue
             for rel in tracked_markdown(repo_dir):
+                if excluded(f"{repo}/{rel}", exclude):
+                    continue
                 try:
                     md = (repo_dir / rel).read_text(encoding="utf-8", errors="replace")
                 except OSError:
@@ -119,8 +141,12 @@ class Corpus:
                 sections.extend(split_sections(repo, rel, md))
         return cls(sections, files)
 
-    def read(self, ref: str, heading: str | None = None, max_chars: int = 12_000) -> str:
-        """Return a whole file, or one section of it, truncated to `max_chars`."""
+    def read(self, ref: str, heading: str | None = None, max_chars: int = READ_MAX_CHARS) -> str:
+        """Return a whole file, or one section of it, truncated to `max_chars`.
+
+        A truncated whole file ends with its section headings, so the model can read
+        the one it needs.
+        """
         if ref not in self.files:
             raise KeyError(ref)
         if heading:
@@ -134,8 +160,32 @@ class Corpus:
         else:
             text = self.files[ref]
         if len(text) > max_chars:
-            text = text[:max_chars] + f"\n\n[truncated: {len(text) - max_chars} more chars]"
+            more = len(text) - max_chars
+            text = text[:max_chars] + f"\n\n[truncated: {more} more chars]"
+            if not heading:
+                headings = [s.heading for s in self.sections if s.ref == ref and s.heading]
+                if headings:
+                    text += "\nSections (read one with heading=...):\n" + "\n".join(
+                        f"- {h}" for h in headings
+                    )
         return text
+
+
+def exclude_from_env() -> tuple[str, ...]:
+    raw = os.environ.get("DOCS_AGENT_EXCLUDE")
+    if raw is None:
+        return DEFAULT_EXCLUDE
+    return tuple(g.strip() for g in raw.split(",") if g.strip())
+
+
+def excluded(ref: str, globs: tuple[str, ...]) -> bool:
+    """True if `ref` ("repo/path") matches any glob; `*` also matches `/`."""
+    return any(fnmatch.fnmatchcase(ref, g) for g in globs)
+
+
+def fingerprint(text: str) -> str:
+    """Whitespace- and case-insensitive hash of a section's text, for near-duplicates."""
+    return hashlib.sha1(" ".join(text.lower().split()).encode()).hexdigest()
 
 
 class Retriever(Protocol):
@@ -152,6 +202,7 @@ class KeywordRetriever:
         self.k1, self.b = k1, b
         self.docs: list[Counter[str]] = []
         self.meta: list[set[str]] = []
+        self.prints = [fingerprint(f"{s.heading}\n{s.text}") for s in corpus.sections]
         df: Counter[str] = Counter()
         for s in corpus.sections:
             tf = Counter(tokenize(s.text))
@@ -183,10 +234,20 @@ class KeywordRetriever:
             if score > 0:
                 scored.append((score, i))
         scored.sort(reverse=True)
-        return [
-            Hit(self.corpus.sections[i], round(s, 3), snippet(self.corpus.sections[i].text, terms))
-            for s, i in scored[:limit]
-        ]
+        # The same text copied into several files (a doc and its mirror, a note and the
+        # doc distilled from it) would fill the results with one answer: keep the best.
+        hits: list[Hit] = []
+        seen: set[str] = set()
+        for s, i in scored:
+            section = self.corpus.sections[i]
+            key = self.prints[i]
+            if key in seen:
+                continue
+            seen.add(key)
+            hits.append(Hit(section, round(s, 3), snippet(section.text, terms)))
+            if len(hits) == limit:
+                break
+        return hits
 
 
 def snippet(text: str, terms: set[str], width: int = 300) -> str:

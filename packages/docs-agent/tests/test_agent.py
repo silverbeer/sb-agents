@@ -115,8 +115,59 @@ async def test_eval_summary_and_judge_wrapper_offline() -> None:
     report = await build_dataset(judge).evaluate(answer, max_concurrency=4, progress=False)
     passed, total, scores = summarize(report)
 
-    assert total == len(report.cases) == 18
+    assert total == len(report.cases) == 19
     assert 0 <= passed <= total
     assert {"Calibrated", "LLMJudge"} <= set(scores)
     assert scores["Calibrated"] == 1.0  # every answer is low confidence
-    assert judge.requests == 18 and judge.cost_usd is None
+    assert judge.requests == 19 and judge.cost_usd is None
+
+
+# --- SB-1572: soft budget and over-budget fallback -------------------------------------
+
+
+async def test_tools_stop_fetching_past_soft_budget(
+    deps: Deps, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from pydantic_ai.messages import ToolReturnPart
+
+    import docs_agent.agent as agent_mod
+
+    monkeypatch.setattr(agent_mod, "SOFT_TOKEN_BUDGET", 0)
+    model = TestModel(call_tools=["search_docs"], custom_output_args=answer([]))
+    result = await build_agent(model).run("how to deploy?", deps=deps)
+    returns = [
+        p.content
+        for m in result.all_messages()
+        for p in getattr(m, "parts", ())
+        if isinstance(p, ToolReturnPart) and p.tool_name == "search_docs"
+    ]
+    assert returns == [agent_mod.BUDGET_NOTE]
+
+
+def test_over_budget_answer_is_low_confidence() -> None:
+    from docs_agent.agent import over_budget_answer
+
+    out = over_budget_answer()
+    assert out.confidence == "low" and out.sources == [] and "narrower" in out.answer
+
+
+def test_cli_over_budget_prints_answer_not_traceback(
+    deps: Deps, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from pydantic_ai.exceptions import UsageLimitExceeded
+
+    import docs_agent.cli as cli
+
+    class Over:
+        def __init__(self, *a: object, **k: object) -> None: ...
+
+        def run_sync(self, q: str) -> None:
+            raise UsageLimitExceeded("Exceeded the total_tokens_limit of 100000")
+
+    monkeypatch.setattr(cli.Corpus, "load", classmethod(lambda cls: deps.corpus))
+    monkeypatch.setattr(cli, "WithDeps", Over)
+    monkeypatch.setattr(cli, "build_agent", lambda: None)
+    assert cli._ask("broad question", show_tools=False) == 0
+    out = capsys.readouterr()
+    assert "couldn't answer" in out.out and "confidence: low" in out.out
+    assert "over budget" in out.err and "Traceback" not in out.err

@@ -195,6 +195,17 @@ CASES: list[Case[str, str, Meta]] = [
         expected_output="The docs don't say who is on call; they only point at a rotation.",
         metadata=Meta(answerable=False),
     ),
+    Case(
+        # SB-1572: a broad question over long docs. Reading the raw research notes in
+        # full ran it to 101k tokens and a UsageLimitExceeded; it must stay in budget.
+        name="broad-mls-next-fest-cup",
+        inputs="Does playing at MLS NEXT Fest qualify a team for MLS NEXT Cup?",
+        expected_output=(
+            "No. Fest is not a listed MLS NEXT Cup route in 2026-27 and needs no "
+            "qualification to attend; it is a scouting and recruiting showcase."
+        ),
+        metadata=Meta(["missing-table/docs/03-architecture/mls-next-qualification-facts.md"]),
+    ),
 ]
 
 

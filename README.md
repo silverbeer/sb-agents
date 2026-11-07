@@ -32,9 +32,16 @@ keyword search over heading-level sections behind a `Retriever` protocol (qmd
 backend: SB-1483). The agent must search before answering and may only cite real
 corpus files; both are enforced by an output validator.
 
+Budget (SB-1572): `DOCS_AGENT_EXCLUDE` (comma-separated globs over `repo/path`; default
+`*/docs/research/*`, `""` = none) keeps raw research notes out of the index. Search
+drops near-identical sections; a whole-file read returns at most 6k chars plus the
+file's section headings. Past 40k tokens the tools tell the model to answer now, and a
+run that still exceeds `USAGE_LIMITS` answers "couldn't answer within budget" at low
+confidence (CLI and A2A), never a traceback or a failed task.
+
 ```bash
 op run --env-file=.env.op -- uv run docs-agent ask -v "How do I deploy missing-table?"
-op run --env-file=.env.op -- uv run docs-agent eval   # 13 cases, real model, exits 1 below 80%
+op run --env-file=.env.op -- uv run docs-agent eval   # 19 cases, real model, exits 1 below 80%
 make eval                                             # same, exporting the score to Grafana (~$0.07)
 uv run docs-agent eval --model ollama:gemma4:12b-16k   # other models: see docs/notes/model-comparison.md
 ```

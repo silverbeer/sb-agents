@@ -127,6 +127,32 @@ async def test_adk_remote_agent_round_trip(deps: Deps) -> None:
     assert any("janitor/README.md" in t for t in texts)
 
 
+async def test_over_budget_task_completes_with_low_confidence_answer(
+    deps: Deps, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """SB-1572: a run over its limits answers "couldn't answer", not a failed task."""
+    from google.adk.agents.remote_a2a_agent import RemoteA2aAgent
+    from pydantic_ai.usage import UsageLimits
+
+    import docs_agent.agent as agent_mod
+
+    monkeypatch.setattr(agent_mod, "USAGE_LIMITS", UsageLimits(request_limit=1))
+    app = build_app(deps=deps, agent=build_agent(fake_model()), url=BASE)
+    async with app.router.lifespan_context(app):
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url=BASE) as client:
+            remote = RemoteA2aAgent(
+                name="docs_agent",
+                agent_card=f"{BASE}/.well-known/agent-card.json",
+                httpx_client=client,
+            )
+            events = await run_adk(remote, "Everything about every competition?")
+
+    assert not [e.error_message for e in events if e.error_message]
+    texts = [p.text for e in events if e.content for p in e.content.parts or [] if p.text]
+    assert any(agent_mod.OVER_BUDGET in t and "confidence: low" in t for t in texts)
+
+
 async def test_adk_reports_error_when_docs_agent_is_down() -> None:
     from google.adk.agents.remote_a2a_agent import RemoteA2aAgent
 

@@ -79,3 +79,53 @@ def test_read_whole_file_section_and_truncation(corpus: Corpus) -> None:
 def test_read_unknown_raises_keyerror(corpus: Corpus, ref: str, heading: str | None) -> None:
     with pytest.raises(KeyError):
         corpus.read(ref, heading)
+
+
+# --- SB-1572: excludes, capped reads, deduped hits -------------------------------------
+
+
+def test_exclude_globs_index_files_out(tmp_path: Path) -> None:
+    d = tmp_path / "mt"
+    files = {"docs/guide.md": "# Guide\n\nok", "docs/research/notes/fest.md": "# Fest\n\nraw"}
+    for rel, body in files.items():
+        (d / rel).parent.mkdir(parents=True, exist_ok=True)
+        (d / rel).write_text(body)
+    subprocess.run(["git", "init", "-q", str(d)], check=True)
+    subprocess.run(["git", "-C", str(d), "add", *files], check=True)
+
+    assert sorted(Corpus.load(tmp_path, repos=("mt",)).files) == ["mt/docs/guide.md"]
+    assert len(Corpus.load(tmp_path, repos=("mt",), exclude=()).files) == 2
+
+
+def test_exclude_env_overrides_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    from docs_agent.corpus import DEFAULT_EXCLUDE, exclude_from_env
+
+    monkeypatch.delenv("DOCS_AGENT_EXCLUDE", raising=False)
+    assert exclude_from_env() == DEFAULT_EXCLUDE
+    monkeypatch.setenv("DOCS_AGENT_EXCLUDE", " a/*.md , ,b/x.md")
+    assert exclude_from_env() == ("a/*.md", "b/x.md")
+    monkeypatch.setenv("DOCS_AGENT_EXCLUDE", "")
+    assert exclude_from_env() == ()
+
+
+def test_truncated_whole_file_read_lists_its_sections() -> None:
+    md = "# One\n\n" + "x" * 500 + "\n\n# Two\n\nshort"
+    corpus = Corpus(split_sections("r", "big.md", md), {"r/big.md": md})
+    out = corpus.read("r/big.md", max_chars=100)
+    assert "[truncated:" in out
+    assert out.endswith("Sections (read one with heading=...):\n- One\n- Two")
+    # a section read is not followed by the outline
+    assert "Sections" not in corpus.read("r/big.md", "One", max_chars=50)
+
+
+def test_search_drops_near_identical_sections() -> None:
+    body = "# Cup\n\nFest does not qualify a team for MLS NEXT Cup."
+    copy = "# cup\n\nFest  does not qualify a team\nfor MLS NEXT Cup."
+    other = "# Flex\n\nFlex group winners qualify for MLS NEXT Cup."
+    files = {"r/a.md": body, "r/b.md": copy, "r/c.md": other}
+    sections = [s for ref, md in files.items() for s in split_sections("r", ref[2:], md)]
+    hits = KeywordRetriever(Corpus(sections, files)).search("fest qualify cup", limit=3)
+    assert [h.section.ref for h in hits].count("r/a.md") + [h.section.ref for h in hits].count(
+        "r/b.md"
+    ) == 1
+    assert "r/c.md" in [h.section.ref for h in hits]

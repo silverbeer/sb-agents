@@ -8,7 +8,9 @@ import os
 import sys
 import time
 
-from docs_agent.agent import Deps, WithDeps, build_agent
+from pydantic_ai.exceptions import UsageLimitExceeded
+
+from docs_agent.agent import Deps, WithDeps, build_agent, over_budget_answer
 from docs_agent.corpus import Corpus, KeywordRetriever
 from sb_obs import setup_telemetry
 
@@ -17,7 +19,14 @@ def _ask(question: str, show_tools: bool) -> int:
     corpus = Corpus.load()
     deps = Deps(corpus, KeywordRetriever(corpus))
     start = time.perf_counter()
-    result = WithDeps(build_agent(), deps, caller="cli").run_sync(question)
+    try:
+        result = WithDeps(build_agent(), deps, caller="cli").run_sync(question)
+    except UsageLimitExceeded as exc:
+        out = over_budget_answer()
+        print(out.answer)
+        print(f"\nconfidence: {out.confidence}")
+        print(f"\n[{time.perf_counter() - start:.1f}s, over budget: {exc}]", file=sys.stderr)
+        return 0
     out = result.output
 
     if show_tools:
