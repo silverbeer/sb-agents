@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Build the sb-agents image into k3s and roll out docs-agent, mt-agent, sb-support and
-# sb-support-api.
+# sb-support-api; apply the motw-agent CronJobs.
 #
 #   bash k3s/deploy.sh               # build, secrets, apply, wait, prune old images
 #   bash k3s/deploy.sh --skip-build  # re-apply manifests/secrets on the current image
@@ -38,6 +38,14 @@ for app in docs-agent mt-agent sb-support sb-support-api; do
     k -n sb-agents rollout restart "deploy/$app" >/dev/null
     k -n sb-agents rollout status "deploy/$app" --timeout=300s
 done
+
+# CronJobs (SB-1545): no rollout, the next scheduled run uses the new image. Only once
+# their ConfigMap (picks channel + approvers) exists; see docs/notes/motw-agent.md.
+if k -n sb-agents get configmap motw-agent >/dev/null 2>&1; then
+    sed "s/IMAGE_TAG/$TAG/g" k3s/motw-agent.yaml | k apply -f -
+else
+    echo "skipping motw-agent CronJobs: no ConfigMap motw-agent (docs/notes/motw-agent.md)"
+fi
 
 # Keep the newest $KEEP sb-agents images; nerdctl refuses any a container still uses.
 nerdctl --namespace k8s.io images --filter reference=sb-agents \
