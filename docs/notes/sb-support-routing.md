@@ -39,6 +39,20 @@ the card's description and skill examples as the tool description. Adding infra-
 (SB-1473) will be a URL, not code. An unreachable specialist is logged and skipped;
 sb-support still starts. Discovery is a separate trace, since it runs before any question.
 
+## Rules vs data (SB-1548)
+
+Competition rules (MLS NEXT Cup, Flex and Fest qualification, divisions, tiebreakers) are
+documented, not data: they live in missing-table's facts docs, so docs-agent answers
+them. mt-agent has live data (results, fixtures, standings, which conference a team is
+in) and says on its card that it holds no rules. "Can team X qualify?" asks both, and
+the reply keeps the rule apart from where the team stands. The split is stated in three
+places: docs-agent's card, mt-agent's card and sb-support's instructions.
+
+**Routing eval:** `make routing-eval` (`sb_support/evals.py`) runs 8 questions through
+the real router against live specialists and checks `Reply.routed_to` exactly. Before
+SB-1548: 4/8, with every rules question sent to mt-agent alone. After: 8/8 on two runs
+(2026-11-07, Haiku).
+
 ## Routing is logged three ways
 
 - a `routed` log line per specialist call (specialist, question);

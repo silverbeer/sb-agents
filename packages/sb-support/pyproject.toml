@@ -17,6 +17,7 @@ dependencies = [
 [project.scripts]
 sb-support = "sb_support.slack:main"
 sb-support-api = "sb_support.api:main"
+sb-support-eval = "sb_support.evals:main"
 
 [tool.uv.sources]
 sb-models = { workspace = true }
