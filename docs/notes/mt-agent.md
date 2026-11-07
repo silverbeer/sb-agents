@@ -306,6 +306,16 @@ first, and treat `matches: []` as "none played", not "unavailable". The eval gai
 run 12/14: one fact choice too strict (qualifying asks for a record, not points), and
 the confidence-rule gap below. After the fix: 14/14 twice, ~$0.022 agent + $0.045 judge.
 
+## Live match: score and scorers (SB-1585)
+
+mt-agent calls mt-mcp `get_live_match` (MT SB-1584) for "what's the score?" / "who
+scored?": it finds the match with `get_upcoming_matches` (status `live`) or
+`get_recent_results`, then reads score, period/minute, goals and cards. Players come back
+from MT as **at most `#7 Tom D.`** and the instructions say to relay them exactly, never
+adding a surname. Most matches aren't tracked live: then the score is known and "who
+scored" is "not recorded", which MT marks with `meta.coverage`. Eval case `last-scorers`
+takes its truth from the same tool.
+
 ## Evals: ground truth read live (SB-1493)
 
 ```bash

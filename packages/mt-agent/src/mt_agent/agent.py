@@ -34,6 +34,7 @@ TOOLS = (
     "list_divisions",
     "get_upcoming_matches",
     "get_recent_results",
+    "get_live_match",
     "get_standings",
 )
 
@@ -51,6 +52,13 @@ matches and standings. Use ONLY your tools; only state facts that appear in tool
   resolve X with search_teams too, then pass its team_id as opponent_id. "matches": [] means
   no played match was found; only an "error" means the data is unavailable. The "summary"
   covers only the matches returned.
+- A match in progress or just played ("what's the score?", "who scored?", "is the game on?"):
+  find it first (get_upcoming_matches for today's match, status "live"; get_recent_results for
+  one already played), then call get_live_match with its match_id. Give the score and the
+  minute or period ("2-1 to IFA, 63'", "half time"). For scorers, list each goal with its
+  minute and the player exactly as the tool gives it ("#9 Sam K. 12'"): never add or guess a
+  surname. "events": [] with meta.coverage set means the match was not tracked live: give
+  the score and say who scored wasn't recorded. A match not started has no score yet.
 - A match preview ("preview Saturday's game", "what should we expect against X?"): resolve
   the team with search_teams, then call match_preview with its team_id and age_group id,
   and relay the preview it returns as is. "not_found" means no upcoming match is scheduled.

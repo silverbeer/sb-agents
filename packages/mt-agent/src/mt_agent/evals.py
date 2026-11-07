@@ -290,6 +290,35 @@ async def _last_result(t: MtTruth) -> Truth:
     )
 
 
+async def _last_scorers(t: MtTruth) -> Truth:
+    """SB-1585: score and scorers of the last game, as get_live_match gives them."""
+    team_id, age_id = await t.team("IFA", "U15")
+    recent = await t.call("get_recent_results", team_id=team_id, age_group_id=age_id, limit=1)
+    if not recent.get("matches"):
+        raise TruthError(f"IFA U15 has no played match: {recent.get('error')}")
+    m = recent["matches"][0]
+    live = await t.call("get_live_match", match_id=m["match_id"])
+    if live.get("error"):
+        raise TruthError(f"get_live_match failed: {live['error']}")
+    goals = [e for e in live.get("events") or [] if e["type"] == "goal"]
+    if goals:
+        who = "; ".join(
+            f"{e['player'] or 'unrecorded'} {e['minute']}' ({e['team']})" for e in goals
+        )
+        facts = [e["player"] for e in goals if e["player"]]
+    else:
+        who = "who scored was not recorded (the match was not tracked live)"
+        facts = []
+    return Truth(
+        f"IFA U15's last game: {_score(m)}. Goals: {who}. Players appear only as number, "
+        "first name and last initial.",
+        Meta(
+            facts=[str(m["goals_for"]), str(m["goals_against"]), *facts],
+            tools=["search_teams", "get_recent_results", "get_live_match"],
+        ),
+    )
+
+
 async def _form(t: MtTruth) -> Truth:
     team_id, age_id = await t.team("IFA", "U15")
     recent = await t.call("get_recent_results", team_id=team_id, age_group_id=age_id, limit=5)
@@ -410,6 +439,9 @@ SPECS: list[Spec] = [
     Spec("other-ages", "What are the standings for IFA U12?", _other_ages),
     Spec("last-result", "How did IFA U15 do in their last game?", _last_result),
     Spec("recent-form", "What's IFA U15's record over their last 5 games?", _form),
+    Spec(
+        "last-scorers", "What was the score in IFA U15's last game, and who scored?", _last_scorers
+    ),
     Spec("head-to-head", "How has IFA U15 done against FC Westchester?", _head_to_head),
     Spec("match-preview", "Preview IFA U15's next game.", _preview),
     Spec(

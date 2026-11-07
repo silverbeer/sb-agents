@@ -34,8 +34,8 @@ DEFAULT_HOST, DEFAULT_PORT = "127.0.0.1", 8102
 
 DESCRIPTION = (
     "Answers questions about MissingTable (MT) youth soccer data: finding teams, their "
-    "recent results and head-to-head record, upcoming matches, match previews, and league "
-    "standings with how many matches have been played. "
+    "recent results and head-to-head record, upcoming matches, match previews, live match "
+    "scores and who scored, and league standings with how many matches have been played. "
     "Reads MT's live data. Holds no competition or qualification rules (how MLS NEXT "
     "Cup, Flex or Fest work): those are documented, not data. "
     "Returns a short answer and a confidence level."
@@ -45,6 +45,7 @@ EXAMPLES = [
     "What are the standings for NEFC U15 in the League?",
     "How is Sporting U13 doing in Flex?",
     "How did IFA U15 do last weekend?",
+    "What's the score of the IFA U15 game? Who scored?",
 ]
 
 
