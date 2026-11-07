@@ -20,6 +20,9 @@ from slack_bolt.async_app import AsyncApp
 from sb_obs import setup_telemetry
 from sb_support.agent import build_agent
 from sb_support.core import InboundMessage, Reply, SupportCore
+from sb_support.motw import MotwApi
+from sb_support.slack_motw import MotwConfig, MotwSlack
+from sb_support.slack_motw import register as register_motw
 from sb_support.specialists import discover
 from sb_support.tables import Table
 
@@ -215,17 +218,28 @@ def is_follow_up(event: dict[str, Any], core: SupportCore, bot_user_id: str | No
     )
 
 
-def build_app(core: SupportCore | None = None) -> AsyncApp:
+def build_app(core: SupportCore | None = None, motw: MotwSlack | None = None) -> AsyncApp:
+    """The Bolt app. MOTW suggestion threads (SB-1546) are answered by `motw`'s
+    deterministic grammar and never reach the core's model."""
     core = core or SupportCore(build_agent())
+    motw = motw or MotwSlack(MotwConfig.from_env(), MotwApi())
     app = AsyncApp(token=os.environ["SLACK_BOT_TOKEN"])
+    register_motw(app, motw)
 
     @app.event("app_mention")
     async def on_mention(event: dict[str, Any], client: Any) -> None:
+        if await motw.on_thread_reply(event, client):
+            return
         await handle_event(event, client, core)
 
     @app.event("message")
     async def on_message(event: dict[str, Any], client: Any, context: Any) -> None:
-        if is_follow_up(event, core, context.get("bot_user_id")):
+        bot = context.get("bot_user_id")
+        if bot and f"<@{bot}>" in event.get("text", ""):
+            return  # arrives as app_mention too
+        if await motw.on_thread_reply(event, client):
+            return
+        if is_follow_up(event, core, bot):
             await handle_event(event, client, core)
 
     return app

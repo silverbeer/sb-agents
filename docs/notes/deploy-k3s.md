@@ -25,6 +25,8 @@ make deploy-apply    # same, without the build (manifest or secret change)
   unpacked, ~140 MB compressed. Built by Rancher's `nerdctl` straight into containerd's
   `k8s.io` namespace: no registry, no second copy in Docker Desktop.
   `imagePullPolicy: Never`.
+- **MOTW write token**: `k3s/motw-token.sh` makes Secret `motw-writer` from
+  `op://agents/mt-motw-agent/token` once that item exists, and skips it until then.
 - **Secrets**: `k3s/provision-secret.sh` resolves `.env.op` + `.env.mt.op` with `op run`
   and pipes Secrets to `kubectl apply` over stdin. One Secret per Deployment with only
   what it uses. No plaintext in any manifest or file.

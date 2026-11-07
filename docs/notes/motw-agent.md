@@ -1,4 +1,4 @@
-# motw-agent: weekly Match of the Week suggestions (SB-1545)
+# motw-agent: weekly Match of the Week suggestions (SB-1545) and Slack approval (SB-1546)
 
 MissingTable features one Match of the Week (MOTW). Picking it is a human decision; the
 legwork isn't. motw-agent does the legwork on a schedule and posts a ready-to-approve
@@ -152,3 +152,91 @@ kubectl --context rancher-desktop -n sb-agents create job motw-test --from=cronj
 
 Slack: the bot must be **invited to #mt-admin-picks** (private) and have `chat:write`
 and `groups:history` (reading the channel for Thursday's lookup).
+
+## Approval in Slack: sb-support (SB-1546)
+
+sb-support's existing Slack app (Socket Mode) handles the suggestion's buttons and
+thread replies: `sb_support/motw.py` (the contract, the reply grammar, MT calls; no
+Slack types) and `sb_support/slack_motw.py` (Bolt handlers). **No model is involved**:
+a reply in a suggestion thread is parsed by a fixed grammar and never reaches the
+routing agent or a specialist, even in a thread the core has answered before, and
+even when it @mentions the bot.
+
+```
+[Pick #N] or "pick N ..."  ─► approver? ── no ──► ephemeral "only approvers", nothing written
+                                  │ yes
+                                  ▼
+                 GET /api/motw?week_start=<payload week>
+                 ├─ unpicked ─► POST /api/admin/motw {match_id, blurb, reasons}
+                 │              chat.update: buttons → "✅ Picked #N (A vs B) by @user",
+                 │              metadata status=picked
+                 └─ picked ───► thread: "already has X. Overwrite with #N?"
+                                [Overwrite with #N] (motw_overwrite_N) ─► POST, as above
+                                [Keep it] (motw_overwrite_cancel)      ─► nothing written
+[Skip] or "skip" ─► chat.update "⏭️ Skipped by @user", status=skipped (no MT write;
+                    Thursday's reminder stays quiet)
+"edit N ..."     ─► chat.update that candidate's draft block + metadata (no MT write)
+```
+
+**Stateless.** Every handler reads the suggestion back with `conversations.history`
+(`latest=oldest=ts`, `inclusive`, `include_all_metadata=true`) and writes it back with
+`chat.update(metadata=...)`. A pick waiting for overwrite confirmation is stored in the
+metadata as `pending` (`{n, blurb, reasons, by}`); the Overwrite button carries only the
+suggestion's ts and the candidate number in its action id, and a button whose `n` no
+longer matches `pending` writes nothing ("out of date"). sb-support restarts lose nothing.
+
+### Thread-reply grammar
+
+Case-insensitive, one command per message; edits go one per line after the head.
+
+| Reply | Does |
+|---|---|
+| `2`, `#2`, `pick 2` | pick candidate 2 as drafted |
+| `pick 2 blurb: <text>` | pick 2 with a new blurb |
+| `edit 2` + lines | change 2's draft in the message; no pick |
+| `pick 2` + lines | apply the lines, then pick |
+| `blurb: <text>` | (line) replace the blurb, ≤ 280 chars |
+| `reason K: <text>` | (line) replace reason K, keeping its kind; `K = count + 1` appends (kind `storyline`) |
+| `reason K <kind>: <text>` | (line) same, with kind one of standings/form/stakes/rivalry/storyline |
+| `drop reason K` | (line) remove reason K |
+| `skip` | skip the week |
+
+Reason numbers refer to the list as shown before the message: replacements apply,
+then drops, then appends. At most 6 reasons, each 1-200 characters (MT's limits).
+A malformed command (`pick two`, `reason 9: ...` on a 3-reason list) gets an ephemeral
+explanation, to approvers only. Anything that doesn't start like a command (`nice
+pick!`) is ignored. A non-approver's valid command gets the ephemeral "only approvers".
+
+Edits are by the approver and are not re-checked against MT's facts: the grounding
+rules bind the model, not the human. The reasons' `kind` is preserved for MT.
+
+### Errors
+
+User-facing text is generic ("Couldn't save the pick to MissingTable. It's been
+logged; try again in a bit."); the HTTP status, body and a missing-token cause go to the
+log only. The buttons stay, so the approver can retry. MT errors on the week check
+never fall through to a write.
+
+### Config (sb-support)
+
+| Env | Source |
+|---|---|
+| `MOTW_APPROVERS` | comma-separated Slack user ids; empty = nobody can approve (fail closed). ConfigMap `motw-agent` |
+| `MOTW_SLACK_CHANNEL` | #mt-admin-picks channel id; thread replies are only read there (buttons work anywhere). ConfigMap `motw-agent` |
+| `MT_MOTW_TOKEN` | `op://agents/mt-motw-agent/token` (MT service account, `manage_motw` only; MT SB-1553). Secret `motw-writer`, made by `k3s/motw-token.sh` once the item exists |
+| `MT_API_URL` | optional, default `https://api.missingtable.com` |
+
+Both refs are `optional` in `k3s/sb-support.yaml`: without them sb-support starts as
+before, and a pick answers "couldn't save" (logged: token not set). Locally:
+`op run --env-file=.env.op --env-file=.env.motw.op -- uv run sb-support`.
+
+### Slack app settings this needs
+
+- **Interactivity** on (Socket Mode delivers `block_actions`; no request URL needed).
+- Bot scopes: `chat:write` (post, update, ephemeral), `groups:history` (read the private
+  channel and its metadata), `reactions:write` (already used), and the **`message.groups`**
+  bot event so thread replies in a private channel arrive. `channels:history` /
+  `message.channels` only if the picks channel is ever public.
+- The bot **invited to #mt-admin-picks**.
+- Slack's metadata docs name `message_metadata:read` for receiving metadata *events*;
+  reading it through `conversations.history` is what this uses. Verify on first run.
