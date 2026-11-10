@@ -21,6 +21,7 @@ uv workspace, one package per agent:
 | `packages/adk-docs-client` | ADK | Router `LlmAgent` that delegates docs questions to docs-agent via `RemoteA2aAgent` |
 | `packages/mt-agent` | ADK + a2a-sdk (`to_a2a`) | Answers questions about MissingTable teams, matches and standings from mt-mcp tools; served over A2A, so sb-support reaches it like docs-agent |
 | `packages/motw-agent` | PydanticAI + slack-sdk | Weekly MissingTable Match of the Week suggestions: k3s CronJobs read mt-mcp candidates, write grounded blurbs + reasons, post to #mt-admin-picks for approval |
+| `packages/sb-evals` | pydantic-evals | Eval runner, written as a reference implementation (see its README): `run_suite` calls the agent per case, `score_executions` scores runs that already happened |
 | `packages/sb-obs` | OpenTelemetry | Shared `setup_telemetry(service)`: traces, metrics, GCP-format JSON logs |
 
 More agents (infra, change, ticket, triage) land as sibling packages.

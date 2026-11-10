@@ -1,11 +1,13 @@
+import asyncio
 from datetime import date
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from motw_fakes import FakeMt, fake_slack, good_draft, scripted_writer
+from motw_fakes import FakeMt, fake_slack, scripted_writer, writer_by_candidate
 
 from motw_agent import fixtures
 from motw_agent.mt import MtError, parse_week, week_start
-from motw_agent.run import Out, remind, suggest
+from motw_agent.run import EVAL_DID_NOT_COMPLETE, Out, remind, suggest
 from motw_agent.slack_post import EVENT_TYPE, find_suggestion
 
 WEEK = date(2026, 11, 9)
@@ -16,7 +18,7 @@ PICKED = {
 
 
 def writer_for(*names: str):
-    return scripted_writer(*(good_draft(fixtures.candidate(n)) for n in names))
+    return writer_by_candidate(*(fixtures.candidate(n) for n in names))
 
 
 def out(client=None) -> Out:
@@ -137,6 +139,78 @@ async def test_dry_run_prints_instead_of_posting(capsys: pytest.CaptureFixture) 
     await suggest(WEEK, FakeMt(result=fixtures.result("top-clash")), writer, o)
     client.chat_postMessage.assert_not_awaited()
     assert '"motw_pick_1"' in capsys.readouterr().out
+
+
+# --- the eval after the post (SB-1620) ------------------------------------------------
+
+
+def evaluator(line: str = "Eval: 1/1 passed.") -> tuple[AsyncMock, Out, MagicMock]:
+    client = fake_slack()
+    return AsyncMock(return_value=line), out(client), client
+
+
+async def test_the_posted_drafts_are_evaluated_and_reported_in_the_thread() -> None:
+    evaluate, o, client = evaluator("Eval: 0/1 passed. #1 failed LLMJudge: unsupported.")
+    writer, _ = writer_for("top-clash")
+    mt = FakeMt(result=fixtures.result("top-clash"))
+    assert await suggest(WEEK, mt, writer, o, evaluate=evaluate) == "posted"
+
+    [(posted, model)] = [c.args for c in evaluate.await_args_list]
+    assert [c.match_id for c, _ in posted] == [4096] and model == "claude-haiku-5-5"
+    first, reply = client.chat_postMessage.await_args_list
+    assert "thread_ts" not in first.kwargs and reply.kwargs["thread_ts"] == "999.1"
+    assert reply.kwargs["text"] == "Eval: 0/1 passed. #1 failed LLMJudge: unsupported."
+
+
+async def test_an_eval_error_says_so_and_the_run_still_succeeds() -> None:
+    evaluate, o, client = evaluator()
+    evaluate.side_effect = RuntimeError("anthropic 529 secret detail")
+    writer, _ = writer_for("top-clash")
+    mt = FakeMt(result=fixtures.result("top-clash"))
+    assert await suggest(WEEK, mt, writer, o, evaluate=evaluate) == "posted"
+    assert client.chat_postMessage.await_count == 2  # the post once, the note once
+    assert client.chat_postMessage.await_args.kwargs["text"] == EVAL_DID_NOT_COMPLETE
+
+
+async def test_a_hung_eval_is_cut_off(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("motw_agent.run.EVAL_TIMEOUT_S", 0.01)
+
+    async def hang(posted: list, model: str) -> str:
+        await asyncio.sleep(30)
+        return "never"
+
+    client = fake_slack()
+    writer, _ = writer_for("top-clash")
+    mt = FakeMt(result=fixtures.result("top-clash"))
+    assert await suggest(WEEK, mt, writer, out(client), evaluate=hang) == "posted"
+    assert client.chat_postMessage.await_args.kwargs["text"] == EVAL_DID_NOT_COMPLETE
+
+
+async def test_failing_to_post_the_eval_result_does_not_fail_the_run() -> None:
+    evaluate, o, client = evaluator()
+    client.chat_postMessage.side_effect = [{"ok": True, "ts": "999.1"}, RuntimeError("slack")]
+    writer, _ = writer_for("top-clash")
+    mt = FakeMt(result=fixtures.result("top-clash"))
+    assert await suggest(WEEK, mt, writer, o, evaluate=evaluate) == "posted"
+
+
+async def test_nothing_posted_means_nothing_evaluated() -> None:
+    evaluate, _, client = evaluator()
+    o = Out(client, "C_PICKS", dry_run=True)
+    writer, _ = writer_for("top-clash")
+    await suggest(WEEK, FakeMt(result=fixtures.result("top-clash")), writer, o, evaluate=evaluate)
+    evaluate.assert_not_awaited()
+
+    await suggest(WEEK, FakeMt(pick=PICKED), scripted_writer()[0], out(client), evaluate=evaluate)
+    evaluate.assert_not_awaited()
+
+
+async def test_the_thursday_fallback_post_is_evaluated_too() -> None:
+    evaluate, o, _ = evaluator()
+    writer, _ = writer_for("top-clash")
+    mt = FakeMt(result=fixtures.result("top-clash"))
+    assert await remind(WEEK, mt, writer, o, ["U1"], evaluate=evaluate) == "posted"
+    evaluate.assert_awaited_once()
 
 
 # --- remind ---------------------------------------------------------------------------

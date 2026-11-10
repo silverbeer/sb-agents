@@ -16,6 +16,9 @@ candidates from mt-mcp. Checks per case, all of which must pass:
 
 The first three restate the output validator on purpose: the validator can be loosened
 by a later change, the eval is the record of what "good" meant.
+
+The same checks also score the real drafts right after `suggest` posts them
+(`evaluate_posted`, SB-1620), as the separate suite `motw-agent-posted`.
 """
 
 from __future__ import annotations
@@ -24,21 +27,23 @@ import argparse
 import asyncio
 import os
 import re
-import time
 from dataclasses import dataclass
 
-from pydantic_evals import Case, Dataset
+from pydantic_evals import Case
 from pydantic_evals.evaluators import Evaluator, EvaluatorContext, LLMJudge
 
 from motw_agent import fixtures
 from motw_agent.candidates import MotwCandidate
 from motw_agent.mt import LiveMt, parse_week
 from motw_agent.writer import HEDGE, QUALIFICATION, Written, build_writer, check_draft, write
-from sb_obs import EvalRecord, emit_eval, model_name, price, setup_telemetry
-from sb_obs.evals import PricedModel, summarize
+from sb_evals import ExecutionRecord, run_suite, score_executions
+from sb_evals.obs_adapter import emit_to_sb_obs
+from sb_obs import model_name, price, setup_telemetry
+from sb_obs.evals import PricedModel
 
 PASS_THRESHOLD = 0.8
 JUDGE_MODEL = os.environ.get("MOTW_AGENT_JUDGE_MODEL", "anthropic:claude-sonnet-5-5")
+POSTED_SUITE = "motw-agent-posted"
 
 ABSENT_AS_ZERO = re.compile(
     r"\b0\s*(points?|goals?|wins?|games?)\b|\bzero\b|\bno (points|goals|wins)\b|"
@@ -101,18 +106,44 @@ RUBRIC = (
 )
 
 
-def build_dataset(cands: dict[str, MotwCandidate], judge: PricedModel) -> Dataset:
-    return Dataset(
-        name="motw-agent",
-        cases=[Case(name=name, inputs=c) for name, c in cands.items()],
-        evaluators=[
-            ModelDraft(),
-            Grounded(),
-            NoInventedQualification(),
-            NoZeroForAbsent(),
-            LLMJudge(rubric=RUBRIC, model=judge, include_input=True),
-        ],
+def build_evaluators(judge: PricedModel) -> list[Evaluator]:
+    return [
+        ModelDraft(),
+        Grounded(),
+        NoInventedQualification(),
+        NoZeroForAbsent(),
+        LLMJudge(rubric=RUBRIC, model=judge, include_input=True),
+    ]
+
+
+def _cost(model: str, w: Written) -> float | None:
+    if w.usage is None or not w.usage.requests:
+        return None
+    return price(model, input_tokens=w.usage.input_tokens, output_tokens=w.usage.output_tokens)
+
+
+async def evaluate_posted(posted: list[tuple[MotwCandidate, Written]], model: str) -> str:
+    """Score the drafts a real run just posted; returns the line for the post's thread."""
+    judge = PricedModel(JUDGE_MODEL)
+    executions = [
+        ExecutionRecord(
+            name=f"#{n}",
+            agent="motw-agent",
+            model=model,
+            inputs=c,
+            output=w,
+            input_tokens=w.usage.input_tokens if w.usage else None,
+            output_tokens=w.usage.output_tokens if w.usage else None,
+            cost_usd=_cost(model, w),
+        )
+        for n, (c, w) in enumerate(posted, 1)
+    ]
+    result = await score_executions(
+        POSTED_SUITE, executions, build_evaluators(judge), sink=emit_to_sb_obs, judge=judge
     )
+    # Slack's three control characters: a judge's reason must render as plain text.
+    text = result.summary().replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    return f"Eval: {text}"
 
 
 async def run_evals(live: bool = False, week: str | None = None) -> float:
@@ -127,39 +158,29 @@ async def run_evals(live: bool = False, week: str | None = None) -> float:
 
     async def task(c: MotwCandidate) -> Written:
         w = await write(writer, c)
-        if w.usage is not None and w.usage.requests:
-            cost = price(
-                model_name(writer.model),
-                input_tokens=w.usage.input_tokens,
-                output_tokens=w.usage.output_tokens,
-            )
-            if cost is not None:
-                costs.append(cost)
+        cost = _cost(model_name(writer.model), w)
+        if cost is not None:
+            costs.append(cost)
         return w
 
-    start = time.perf_counter()
-    report = await build_dataset(cands, judge).evaluate(task, max_concurrency=4, progress=False)
-    report.print(
+    result = await run_suite(
+        "motw-agent",
+        [Case(name=name, inputs=c) for name, c in cands.items()],
+        task,
+        build_evaluators(judge),
+        model=model_name(writer.model),
+        sink=emit_to_sb_obs,
+        judge=judge,
+        agent_cost_usd=lambda: sum(costs) if costs else None,
+    )
+    result.report.print(
         include_input=False, include_output=False, include_durations=True, include_reasons=True
     )
-    passed, total, scores = summarize(report)
-    rate = passed / total if total else 0.0
-    record = EvalRecord(
-        suite="motw-agent",
-        model=model_name(writer.model),
-        judge_model=judge.model_name,
-        cases=total,
-        passed=passed,
-        pass_rate=rate,
-        scores=scores,
-        agent_cost_usd=sum(costs) if costs else None,
-        judge_cost_usd=judge.cost_usd,
-        duration_s=round(time.perf_counter() - start, 1),
-    )
-    emit_eval(record)
-    print(f"\n{passed}/{total} cases passed ({rate:.0%}); threshold {PASS_THRESHOLD:.0%}")
-    print("per evaluator: " + ", ".join(f"{k} {v:.0%}" for k, v in scores.items()))
-    cost = record.cost_usd
+    rate = result.pass_rate
+    print(f"\n{result.passed}/{result.total} cases passed ({rate:.0%}); ", end="")
+    print(f"threshold {PASS_THRESHOLD:.0%}")
+    print("per evaluator: " + ", ".join(f"{k} {v:.0%}" for k, v in result.record.scores.items()))
+    cost = result.record.cost_usd
     print(f"cost: ${cost:.4f}" if cost is not None else "cost: unknown")
     return rate
 

@@ -1,0 +1,18 @@
+[project]
+name = "sb-evals"
+version = "0.1.0"
+description = "Eval runner for agents, written as a reference implementation"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "sb-obs[evals]",
+    "pydantic>=2.10",
+    "pydantic-evals>=2.64",
+]
+
+[tool.uv.sources]
+sb-obs = { workspace = true }
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

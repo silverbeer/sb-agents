@@ -14,6 +14,7 @@ members = [
     "motw-agent",
     "mt-agent",
     "sb-agents",
+    "sb-evals",
     "sb-models",
     "sb-obs",
     "sb-support",
@@ -1166,6 +1167,7 @@ dependencies = [
     { name = "mcp" },
     { name = "pydantic-ai-slim", extra = ["anthropic"] },
     { name = "pydantic-evals" },
+    { name = "sb-evals" },
     { name = "sb-models" },
     { name = "sb-obs", extra = ["evals"] },
     { name = "slack-sdk" },
@@ -1177,6 +1179,7 @@ requires-dist = [
     { name = "mcp", specifier = ">=2.3" },
     { name = "pydantic-ai-slim", extras = ["anthropic"], specifier = ">=2.64" },
     { name = "pydantic-evals", specifier = ">=2.64" },
+    { name = "sb-evals", editable = "packages/sb-evals" },
     { name = "sb-models", editable = "packages/sb-models" },
     { name = "sb-obs", extras = ["evals"], editable = "packages/sb-obs" },
     { name = "slack-sdk", specifier = ">=3.33" },
@@ -2203,6 +2206,23 @@ dev = [
     { name = "pytest-asyncio", specifier = ">=0.24" },
     { name = "pyyaml", specifier = ">=6" },
     { name = "ruff", specifier = ">=0.8" },
+]
+
+[[package]]
+name = "sb-evals"
+version = "0.1.0"
+source = { editable = "packages/sb-evals" }
+dependencies = [
+    { name = "pydantic" },
+    { name = "pydantic-evals" },
+    { name = "sb-obs", extra = ["evals"] },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "pydantic", specifier = ">=2.10" },
+    { name = "pydantic-evals", specifier = ">=2.64" },
+    { name = "sb-obs", extras = ["evals"], editable = "packages/sb-obs" },
 ]
 
 [[package]]
