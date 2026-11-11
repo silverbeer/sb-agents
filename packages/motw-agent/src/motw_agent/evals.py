@@ -28,6 +28,7 @@ import asyncio
 import os
 import re
 from dataclasses import dataclass
+from typing import Any
 
 from pydantic_evals import Case
 from pydantic_evals.evaluators import Evaluator, EvaluatorContext, LLMJudge
@@ -116,6 +117,17 @@ def build_evaluators(judge: PricedModel) -> list[Evaluator]:
     ]
 
 
+def _describe(c: MotwCandidate, w: Written) -> dict[str, Any]:
+    """What an `eval_case` log line shows, so a verdict can be checked against the draft."""
+    return {
+        "match_id": c.match_id,
+        "fixture": c.label,
+        "fallback": w.fallback,
+        "blurb": w.draft.blurb,
+        "reasons": [r.text for r in w.draft.reasons],
+    }
+
+
 def _cost(model: str, w: Written) -> float | None:
     if w.usage is None or not w.usage.requests:
         return None
@@ -139,7 +151,12 @@ async def evaluate_posted(posted: list[tuple[MotwCandidate, Written]], model: st
         for n, (c, w) in enumerate(posted, 1)
     ]
     result = await score_executions(
-        POSTED_SUITE, executions, build_evaluators(judge), sink=emit_to_sb_obs, judge=judge
+        POSTED_SUITE,
+        executions,
+        build_evaluators(judge),
+        sink=emit_to_sb_obs,
+        judge=judge,
+        describe_case=_describe,
     )
     # Slack's three control characters: a judge's reason must render as plain text.
     text = result.summary().replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
@@ -172,6 +189,7 @@ async def run_evals(live: bool = False, week: str | None = None) -> float:
         sink=emit_to_sb_obs,
         judge=judge,
         agent_cost_usd=lambda: sum(costs) if costs else None,
+        describe_case=_describe,
     )
     result.report.print(
         include_input=False, include_output=False, include_durations=True, include_reasons=True

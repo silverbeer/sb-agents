@@ -50,6 +50,13 @@ Keep these when re-implementing, or change them on purpose.
 7. **An eval that runs after the output ships can flag a bad output but can't stop it.**
    To block, score before sending, and decide what happens when the judge is down.
 
+8. **Every case gets its own log line, not only the suite.** A pass rate says something
+   dropped. To ask whether a verdict was right you need the check, the reason and the
+   output side by side. The agent supplies `describe_case`, because only it knows which
+   parts of its output are worth logging.
+9. **Reasons and output sit behind the content switch.** A judge's reason quotes what it
+   graded, so it's treated like a prompt. Pass/fail per check always logs.
+
 ## What to replace
 
 | Here | Replace with |
