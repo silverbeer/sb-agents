@@ -71,6 +71,16 @@ team with 0 games and no table row), `unconfirmed-rule` (Fest bye, `confirmed: f
 `NoZeroForAbsent`, and an `LLMJudge` (Sonnet) on "every line is supported by the facts
 it cites".
 
+### After every real post (SB-1620)
+
+Right after `suggest` posts, the same checks score the drafts it just posted, using
+`sb_evals.score_executions`. The result is one reply in the post's thread (`Eval: 2/3 passed.
+#2 failed LLMJudge: ...`) and an `EvalRecord` under the separate suite
+`motw-agent-posted`, so real weeks don't mix with the fixture trend. No writer call, so
+the cost is the Sonnet judge's only. It runs after the post, so it flags a bad draft but
+can't stop one. An eval error or timeout (180 s) leaves the run successful and the thread
+says it didn't complete. Skipped on `--dry-run`.
+
 ### Results (2026-11-07, Haiku 5.5)
 
 | Prompt | Runs | Passed | What the judge caught |

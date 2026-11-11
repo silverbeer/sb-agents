@@ -59,6 +59,22 @@ def scripted_writer(*drafts: Any) -> tuple[Agent[MotwCandidate, Draft], list[lis
     return build_writer(FunctionModel(respond, model_name="claude-haiku-5-5")), seen
 
 
+def writer_by_candidate(
+    *candidates: MotwCandidate,
+) -> tuple[Agent[MotwCandidate, Draft], list[list[ModelMessage]]]:
+    """Answers each request from the candidate named in its prompt. `suggest` writes drafts
+    concurrently, so a script read in request order would hand a draft to the wrong one."""
+    seen: list[list[ModelMessage]] = []
+
+    def respond(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
+        seen.append(messages)
+        prompt = str(messages[0])
+        c = next(c for c in candidates if c.label in prompt)
+        return ModelResponse(parts=[ToolCallPart(info.output_tools[0].name, good_draft(c))])
+
+    return build_writer(FunctionModel(respond, model_name="claude-haiku-5-5")), seen
+
+
 def fake_slack(history: list[dict[str, Any]] | None = None) -> MagicMock:
     client = MagicMock()
     client.chat_postMessage = AsyncMock(return_value={"ok": True, "ts": "999.1"})

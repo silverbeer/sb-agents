@@ -15,6 +15,7 @@ import os
 
 from sb_models import ModelConfigError, resolve
 
+from motw_agent.evals import evaluate_posted
 from motw_agent.mt import LiveMt, parse_week
 from motw_agent.run import Config, Out, remind, suggest
 from motw_agent.writer import build_writer
@@ -48,10 +49,11 @@ async def _main(args: argparse.Namespace) -> int:
         client = AsyncWebClient(token=token)
     out = Out(client, cfg.channel, dry_run=args.dry_run)
     writer = build_writer()
+    evaluate = None if args.dry_run else evaluate_posted
     if args.command == "suggest":
-        outcome = await suggest(week, LiveMt(), writer, out)
+        outcome = await suggest(week, LiveMt(), writer, out, evaluate=evaluate)
     else:
-        outcome = await remind(week, LiveMt(), writer, out, cfg.approvers)
+        outcome = await remind(week, LiveMt(), writer, out, cfg.approvers, evaluate=evaluate)
     log.info("motw-agent %s: %s", args.command, outcome, extra={"week": week.isoformat()})
     return 1 if outcome == "error" else 0
 

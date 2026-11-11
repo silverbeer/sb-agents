@@ -15,6 +15,7 @@ import json
 import logging
 import os
 import sys
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import date
 from typing import Any, Literal
@@ -30,13 +31,20 @@ from motw_agent.slack_post import (
     suggestion_message,
     week_label,
 )
-from motw_agent.writer import Draft, write
-from sb_obs import track_run
+from motw_agent.writer import Draft, Written, write
+from sb_evals import guarded
+from sb_obs import model_name, track_run
 
 log = logging.getLogger("motw_agent")
 
 SuggestOutcome = Literal["posted", "already_picked", "none", "error"]
 RemindOutcome = Literal["picked", "skipped", "reminded", SuggestOutcome]
+# Scores the drafts just posted, given them and the writer's model name; returns the thread line.
+PostedEval = Callable[[list[tuple[MotwCandidate, Written]], str], Awaitable[str]]
+# Well inside the Job's 600s deadline: a slow judge must not get the Job killed.
+EVAL_TIMEOUT_S = 180
+EVAL_REPLY_TIMEOUT_S = 30
+EVAL_DID_NOT_COMPLETE = "Eval: didn't complete. It's logged."
 
 
 @dataclass
@@ -60,13 +68,15 @@ class Out:
         self.client, self.channel, self.dry_run = client, channel, dry_run
         self.sent: list[dict[str, Any]] = []
 
-    async def post(self, **kwargs: Any) -> None:
+    async def post(self, **kwargs: Any) -> str | None:
+        """Send one message; returns its Slack ts, or None when nothing was really posted."""
         self.sent.append(kwargs)
         if self.dry_run or self.client is None:
             json.dump(kwargs, sys.stdout, indent=1, default=str)
             sys.stdout.write("\n")
-            return
-        await self.client.chat_postMessage(channel=self.channel, **kwargs)
+            return None
+        response = await self.client.chat_postMessage(channel=self.channel, **kwargs)
+        return response["ts"]
 
     async def find_suggestion(self, week: date) -> dict[str, Any] | None:
         if self.client is None:
@@ -80,6 +90,28 @@ def _pick_label(pick: dict[str, Any]) -> str:
     return f"{home} vs {away}" if home and away else f"match {m.get('id', '?')}"
 
 
+async def _report_eval(
+    evaluate: PostedEval,
+    posted: list[tuple[MotwCandidate, Written]],
+    model: str,
+    out: Out,
+    thread_ts: str,
+) -> None:
+    """Score the post and reply in its thread. The post is out: nothing here may fail the run."""
+    line = await guarded(
+        lambda: evaluate(posted, model),
+        timeout_s=EVAL_TIMEOUT_S,
+        fallback=EVAL_DID_NOT_COMPLETE,
+        label="evaluating the posted drafts",
+    )
+    await guarded(
+        lambda: out.post(thread_ts=thread_ts, text=line),
+        timeout_s=EVAL_REPLY_TIMEOUT_S,
+        fallback=None,
+        label="posting the eval result",
+    )
+
+
 async def suggest(
     week: date,
     mt: MtReader,
@@ -87,6 +119,7 @@ async def suggest(
     out: Out,
     *,
     caller: str = "cron",
+    evaluate: PostedEval | None = None,
 ) -> SuggestOutcome:
     label = week_label(week)
     try:
@@ -135,7 +168,10 @@ async def suggest(
             if w.fallback:
                 log.warning("draft fell back to plain facts: %s", w.problems)
         run.confidence = "low" if any(w.fallback for w in written) else "high"
-    await out.post(**suggestion_message(week, result, list(zip(top, written, strict=True))))
+    posted = list(zip(top, written, strict=True))
+    ts = await out.post(**suggestion_message(week, result, posted))
+    if evaluate is not None and ts is not None:
+        await _report_eval(evaluate, posted, model_name(writer.model), out, ts)
     return "posted"
 
 
@@ -145,6 +181,8 @@ async def remind(
     writer: Agent[MotwCandidate, Draft],
     out: Out,
     approvers: list[str],
+    *,
+    evaluate: PostedEval | None = None,
 ) -> RemindOutcome:
     try:
         pick = await mt.current_pick(week)
@@ -156,7 +194,7 @@ async def remind(
     post = await out.find_suggestion(week)
     if post is None:
         log.warning("no suggestion found for %s; posting fresh suggestions", week)
-        return await suggest(week, mt, writer, out, caller="cron-remind")
+        return await suggest(week, mt, writer, out, caller="cron-remind", evaluate=evaluate)
     payload = (post.get("metadata") or {}).get("event_payload") or {}
     if payload.get("status") == "skipped":
         return "skipped"

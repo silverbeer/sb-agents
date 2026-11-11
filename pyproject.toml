@@ -37,4 +37,4 @@ select = ["E", "F", "I", "B", "UP"]
 "packages/motw-agent/src/motw_agent/fixtures.py" = ["E501"]
 
 [tool.ruff.lint.isort]
-known-first-party = ["sb_support", "docs_agent", "adk_docs_client", "mt_agent", "motw_agent", "sb_obs"]
+known-first-party = ["sb_support", "docs_agent", "adk_docs_client", "mt_agent", "motw_agent", "sb_obs", "sb_evals"]
