@@ -15,21 +15,21 @@ from __future__ import annotations
 import logging
 import time
 from collections.abc import Awaitable, Callable, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Protocol
 
 from pydantic_evals import Case, Dataset
 from pydantic_evals.evaluators import Evaluator
 from pydantic_evals.reporting import EvaluationReport
 
-from sb_evals.records import ExecutionRecord, SuiteRecord
+from sb_evals.records import CaseResult, ExecutionRecord, SuiteRecord
 
 log = logging.getLogger("sb_evals")
 
 MAX_CONCURRENCY = 4
-REASON_CHARS = 200
 
 Sink = Callable[[SuiteRecord], None]
+DescribeCase = Callable[[Any, Any], dict[str, Any]]
 
 
 class CostedJudge(Protocol):
@@ -40,29 +40,6 @@ class CostedJudge(Protocol):
 
     @property
     def cost_usd(self) -> float | None: ...
-
-
-@dataclass(frozen=True)
-class CaseResult:
-    name: str
-    failed: dict[str, str | None] = field(default_factory=dict)  # check -> its reason
-    unchecked: list[str] = field(default_factory=list)  # checks that raised
-    crashed: bool = False  # the task itself raised, so no check ran
-
-    @property
-    def passed(self) -> bool:
-        return not (self.failed or self.unchecked or self.crashed)
-
-    def describe(self) -> str:
-        """What went wrong, without exception text: this can reach a chat channel."""
-        if self.crashed:
-            return f"{self.name} did not run"
-        parts = [
-            f"failed {check}: {_clip(reason)}" if reason else f"failed {check}"
-            for check, reason in self.failed.items()
-        ]
-        parts += [f"could not run {check}" for check in self.unchecked]
-        return f"{self.name} " + ", ".join(parts)
 
 
 @dataclass(frozen=True)
@@ -90,21 +67,37 @@ class SuiteResult:
         return " ".join([head, "; ".join(problems) + "."]) if problems else head
 
 
-def _clip(text: str) -> str:
-    text = " ".join(text.split()).rstrip(".")
-    return text if len(text) <= REASON_CHARS else text[: REASON_CHARS - 1].rstrip() + "…"
+def _detail(describe_case: DescribeCase | None, case: Any) -> dict[str, Any]:
+    """What the agent says is worth logging. Failing to describe a case can't fail the eval."""
+    if describe_case is None:
+        return {}
+    try:
+        return describe_case(case.inputs, case.output)
+    except Exception:
+        log.exception("describing eval case %s failed", case.name)
+        return {}
 
 
-def _case_results(report: EvaluationReport) -> list[CaseResult]:
+def _case_results(
+    report: EvaluationReport,
+    executions: Sequence[ExecutionRecord],
+    describe_case: DescribeCase | None,
+) -> list[CaseResult]:
+    ids = {e.name: e.execution_id for e in executions}
     results = [
         CaseResult(
             name=case.name,
-            failed={n: a.reason for n, a in case.assertions.items() if not a.value},
+            execution_id=ids.get(case.name),
+            checks={n: bool(a.value) for n, a in case.assertions.items()},
+            reasons={n: a.reason for n, a in case.assertions.items() if a.reason},
             unchecked=[f.name for f in case.evaluator_failures],
+            detail=_detail(describe_case, case),
         )
         for case in report.cases
     ]
-    results += [CaseResult(name=f.name, crashed=True) for f in report.failures]
+    results += [
+        CaseResult(name=f.name, execution_id=ids.get(f.name), crashed=True) for f in report.failures
+    ]
     for case in report.cases:
         for f in case.evaluator_failures:
             log.error("eval check raised: %s on %s: %s", f.name, case.name, f.error_message)
@@ -132,16 +125,18 @@ async def run_suite(
     sink: Sink,
     judge: CostedJudge | None = None,
     agent_cost_usd: Callable[[], float | None] = lambda: None,
-    execution_ids: Sequence[str] = (),
+    executions: Sequence[ExecutionRecord] = (),
+    describe_case: DescribeCase | None = None,
 ) -> SuiteResult:
     """Run `task` on every case, score it, and send the record to `sink`.
 
     `agent_cost_usd` is read after the run, so a task can add up its own cost as it goes.
+    `describe_case(inputs, output)` returns what's worth logging about a case.
     """
     start = time.perf_counter()
     dataset = Dataset(name=suite, cases=list(cases), evaluators=list(evaluators))
     report = await dataset.evaluate(task, max_concurrency=MAX_CONCURRENCY, progress=False)
-    results = _case_results(report)
+    results = _case_results(report, executions, describe_case)
     passed = sum(r.passed for r in results)
     record = SuiteRecord(
         suite=suite,
@@ -154,7 +149,7 @@ async def run_suite(
         agent_cost_usd=agent_cost_usd(),
         judge_cost_usd=judge.cost_usd if judge else None,
         duration_s=round(time.perf_counter() - start, 1),
-        execution_ids=list(execution_ids),
+        case_results=results,
     )
     sink(record)
     return SuiteResult(record, results, report)
@@ -167,6 +162,7 @@ async def score_executions(
     *,
     sink: Sink,
     judge: CostedJudge | None = None,
+    describe_case: DescribeCase | None = None,
 ) -> SuiteResult:
     """Score runs that already happened. No agent call, so the only cost is the judge's.
 
@@ -197,5 +193,6 @@ async def score_executions(
         model=",".join(sorted({e.model for e in executions})),
         sink=sink,
         judge=judge,
-        execution_ids=[e.execution_id for e in executions],
+        executions=executions,
+        describe_case=describe_case,
     )

@@ -5,10 +5,10 @@ that knows about this repo's telemetry.
 """
 
 from sb_evals.guard import guarded
-from sb_evals.records import ExecutionRecord, SuiteRecord
+from sb_evals.records import CaseResult, ExecutionRecord, SuiteRecord
 from sb_evals.suite import (
-    CaseResult,
     CostedJudge,
+    DescribeCase,
     Sink,
     SuiteResult,
     run_suite,
@@ -18,6 +18,7 @@ from sb_evals.suite import (
 __all__ = [
     "CaseResult",
     "CostedJudge",
+    "DescribeCase",
     "ExecutionRecord",
     "Sink",
     "SuiteRecord",
