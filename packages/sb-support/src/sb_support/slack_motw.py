@@ -158,7 +158,7 @@ class MotwSlack:
     ) -> str:
         """Check the week, then write or ask to overwrite. Returns a user-facing outcome."""
         try:
-            existing = await self.api.current_pick(s.week_start)
+            existing = await self.api.current_pick(s.week_start, s.slot)
         except MotwApiError:
             log.exception("MOTW week check failed for %s", s.week_start)
             return CHECK_FAILED
@@ -174,7 +174,10 @@ class MotwSlack:
             await client.chat_postMessage(
                 channel=channel,
                 thread_ts=msg["ts"],
-                text=f"This week already has {pick_label(existing)}. Overwrite with #{c.n}?",
+                text=(
+                    f"{s.slot_label + ' ' if s.slot else ''}already has {pick_label(existing)} "
+                    f"this week. Overwrite with #{c.n}?"
+                ),
                 blocks=[
                     {
                         "type": "section",
@@ -182,7 +185,7 @@ class MotwSlack:
                             "type": "mrkdwn",
                             "text": (
                                 f"<@{user}> the week of {s.week_start} already has a "
-                                "Match of the Week: "
+                                f"{s.slot_label + ' ' if s.slot else ''}Match of the Week: "
                                 f"*{pick_label(existing)}*. Overwrite it with #{c.n} ({c.label})?"
                             ),
                         },

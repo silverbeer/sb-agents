@@ -99,3 +99,36 @@ def test_unknown_fields_from_mt_are_ignored() -> None:
     data = payload() | {"weights": {"quality": 0.4}, "something_new": 1}
     data["candidates"][0]["new_field"] = "x"
     assert CandidatesResult.model_validate(data).candidates
+
+
+# --- slots (SB-1640) ---------------------------------------------------------------
+
+from motw_agent.mt import SLOTS, Slot, slot_pick  # noqa: E402
+
+
+def test_seven_slots_and_no_pathway_u15() -> None:
+    assert len(SLOTS) == 7
+    assert Slot("pathway", "U15") not in SLOTS
+    assert [s.label for s in SLOTS if s.pool == "pathway"] == [
+        "U16 Pro Pathway",
+        "U17 Pro Pathway",
+        "U19 Pro Pathway",
+    ]
+
+
+def test_slot_parse() -> None:
+    assert Slot.parse("U16") == Slot("main", "U16")
+    assert Slot.parse("pathway:U17") == Slot("pathway", "U17")
+
+
+def test_slot_pick_reads_the_slot_and_tolerates_an_old_mt() -> None:
+    body = {
+        "motw": {"match": {"id": 1}},
+        "picks": [
+            {"pool": "main", "age_group": "U15", "match": {"id": 1}},
+            {"pool": "pathway", "match": {"id": 3, "age_group_name": "U16"}},
+        ],
+    }
+    assert slot_pick(body, Slot("pathway", "U16"))["match"]["id"] == 3
+    assert slot_pick(body, Slot("main", "U16")) is None
+    assert slot_pick({"motw": {"match": {"id": 9}}}, Slot("main", "U16"))["match"]["id"] == 9

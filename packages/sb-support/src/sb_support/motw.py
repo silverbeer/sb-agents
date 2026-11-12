@@ -32,7 +32,8 @@ import httpx
 log = logging.getLogger("sb_support.motw")
 
 EVENT_TYPE = "motw_suggestion"
-CONTRACT_VERSION = 1
+CONTRACT_VERSION = 2  # v2 adds "slot": {"pool", "age_group"} (SB-1640)
+READABLE_VERSIONS = frozenset({1, 2})  # v1: one suggestion for the whole week
 KINDS = ("standings", "form", "stakes", "rivalry", "storyline")
 DEFAULT_KIND = "storyline"
 REASON_MAX, BLURB_MAX, MAX_REASONS = 200, 280, 6
@@ -83,6 +84,23 @@ class Suggestion:
     status: str = "open"  # open | picked | skipped
     extra: dict[str, Any] = field(default_factory=dict)  # picked, by, pending, ...
 
+    @property
+    def slot(self) -> dict[str, str] | None:
+        """{"pool", "age_group"} this suggestion is for; None for a v1 whole-week one."""
+        raw = self.extra.get("slot")
+        return raw if isinstance(raw, dict) and raw.get("age_group") else None
+
+    @property
+    def slot_label(self) -> str:
+        slot = self.slot
+        if slot is None:
+            return ""
+        return (
+            f"{slot['age_group']} Pro Pathway"
+            if slot.get("pool") == "pathway"
+            else slot["age_group"]
+        )
+
     def candidate(self, n: int) -> Candidate | None:
         return next((c for c in self.candidates if c.n == n), None)
 
@@ -106,8 +124,10 @@ class Suggestion:
             return None
         p = metadata.get("event_payload") or {}
         try:
-            if int(p.get("v", 0)) != CONTRACT_VERSION:
-                log.warning("motw suggestion contract v%s, expected v%s", p.get("v"), 1)
+            if int(p.get("v", 0)) not in READABLE_VERSIONS:
+                log.warning(
+                    "motw suggestion contract v%s, expected v%s", p.get("v"), CONTRACT_VERSION
+                )
                 return None
             cands = tuple(
                 Candidate(
@@ -299,12 +319,23 @@ class MotwApi:
             raise MotwApiError(f"{method} {path}: HTTP {resp.status_code}: {resp.text[:300]}")
         return resp
 
-    async def current_pick(self, week_start: str) -> dict[str, Any] | None:
+    async def current_pick(
+        self, week_start: str, slot: dict[str, str] | None = None
+    ) -> dict[str, Any] | None:
+        """The slot's pick, or the week's one pick for a v1 suggestion (no slot)."""
         resp = await self._request("GET", "/api/motw", params={"week_start": week_start})
         try:
-            return resp.json().get("motw")
+            body = resp.json()
         except ValueError as exc:
             raise MotwApiError(f"GET /api/motw: not JSON: {exc}") from exc
+        picks = body.get("picks")
+        if slot is None or picks is None:  # v1 suggestion, or an MT from before SB-1638
+            return body.get("motw")
+        for p in picks:
+            age = p.get("age_group") or (p.get("match") or {}).get("age_group_name")
+            if (p.get("pool") or "main") == slot.get("pool", "main") and age == slot["age_group"]:
+                return p
+        return None
 
     async def set_pick(self, c: Candidate) -> dict[str, Any]:
         if not self._token:

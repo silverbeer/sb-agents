@@ -124,8 +124,22 @@ def test_the_suggestion_round_trips_and_keeps_unknown_fields() -> None:
     s = Suggestion("2026-11-09", (C2,), "open", {"pending": {"n": 2}})
     meta = s.to_metadata()
     assert meta["event_type"] == "motw_suggestion"
-    assert meta["event_payload"]["v"] == 1
+    assert meta["event_payload"]["v"] == 2
     assert Suggestion.from_metadata(meta) == s
+
+
+def test_a_v2_suggestion_carries_its_slot() -> None:
+    s = Suggestion("2026-11-09", (C2,), "open", {"slot": {"pool": "pathway", "age_group": "U16"}})
+    back = Suggestion.from_metadata(s.to_metadata())
+    assert back.slot == {"pool": "pathway", "age_group": "U16"}
+    assert back.slot_label == "U16 Pro Pathway"
+
+
+def test_a_v1_suggestion_still_reads_and_has_no_slot() -> None:
+    meta = Suggestion("2026-11-09", (C2,)).to_metadata()
+    meta["event_payload"]["v"] = 1
+    back = Suggestion.from_metadata(meta)
+    assert back is not None and back.slot is None and back.slot_label == ""
 
 
 @pytest.mark.parametrize(
@@ -133,7 +147,7 @@ def test_the_suggestion_round_trips_and_keeps_unknown_fields() -> None:
     [
         None,
         {"event_type": "something_else", "event_payload": {}},
-        {"event_type": "motw_suggestion", "event_payload": {"v": 2, "week_start": "x"}},
+        {"event_type": "motw_suggestion", "event_payload": {"v": 3, "week_start": "x"}},
         {"event_type": "motw_suggestion", "event_payload": {"v": 1, "candidates": [{"n": 1}]}},
     ],
 )
@@ -159,6 +173,35 @@ async def test_the_week_check_reads_the_public_endpoint() -> None:
     assert await api(handler).current_pick("2026-11-09") is None
     assert str(seen[0].url) == "https://mt.test/api/motw?week_start=2026-11-09"
     assert "authorization" not in seen[0].headers
+
+
+PICKS = {
+    "week_start": "2026-11-09",
+    "motw": {"pool": "main", "age_group": "U15", "match": {"id": 1}},
+    "picks": [
+        {"pool": "main", "age_group": "U15", "match": {"id": 1}},
+        {"pool": "pathway", "age_group": "U16", "match": {"id": 3}},
+    ],
+}
+
+
+async def test_the_slot_check_finds_only_that_slot_s_pick() -> None:
+    a = api(lambda r: httpx.Response(200, json=PICKS))
+    assert (await a.current_pick("2026-11-09", {"pool": "pathway", "age_group": "U16"}))["match"][
+        "id"
+    ] == 3
+    assert await a.current_pick("2026-11-09", {"pool": "main", "age_group": "U16"}) is None
+
+
+async def test_a_v1_check_or_an_old_mt_uses_the_one_pick() -> None:
+    assert (await api(lambda r: httpx.Response(200, json=PICKS)).current_pick("2026-11-09"))[
+        "match"
+    ]["id"] == 1
+    old = {"week_start": "2026-11-09", "motw": {"match": {"id": 9}}}
+    got = await api(lambda r: httpx.Response(200, json=old)).current_pick(
+        "2026-11-09", {"pool": "main", "age_group": "U16"}
+    )
+    assert got["match"]["id"] == 9
 
 
 async def test_a_pick_posts_match_blurb_and_reasons_with_the_motw_token() -> None:

@@ -6,8 +6,16 @@ import pytest
 from motw_fakes import FakeMt, fake_slack, scripted_writer, writer_by_candidate
 
 from motw_agent import fixtures
-from motw_agent.mt import MtError, parse_week, week_start
-from motw_agent.run import EVAL_DID_NOT_COMPLETE, Out, remind, suggest
+from motw_agent.mt import SLOTS, MtError, Slot, parse_week, week_start
+from motw_agent.run import (
+    EVAL_DID_NOT_COMPLETE,
+    Out,
+    overall,
+    remind,
+    remind_week,
+    suggest,
+    suggest_week,
+)
 from motw_agent.slack_post import EVENT_TYPE, find_suggestion
 
 WEEK = date(2026, 11, 9)
@@ -94,7 +102,7 @@ async def test_the_top_three_are_posted_with_buttons_and_metadata(
     meta = kwargs["metadata"]
     assert meta["event_type"] == EVENT_TYPE
     payload = meta["event_payload"]
-    assert payload["v"] == 1 and payload["week_start"] == "2026-11-09"
+    assert payload["v"] == 2 and payload["week_start"] == "2026-11-09"
     assert payload["status"] == "open"
     assert [c["match_id"] for c in payload["candidates"]] == [4096, 5120, 6200]
     first = payload["candidates"][0]
@@ -216,14 +224,13 @@ async def test_the_thursday_fallback_post_is_evaluated_too() -> None:
 # --- remind ---------------------------------------------------------------------------
 
 
-def suggestion(ts: str, week: str = "2026-11-09", status: str = "open") -> dict:
-    return {
-        "ts": ts,
-        "metadata": {
-            "event_type": EVENT_TYPE,
-            "event_payload": {"v": 1, "week_start": week, "status": status, "candidates": []},
-        },
-    }
+def suggestion(
+    ts: str, week: str = "2026-11-09", status: str = "open", slot: Slot | None = None
+) -> dict:
+    payload = {"v": 1, "week_start": week, "status": status, "candidates": []}
+    if slot is not None:
+        payload |= {"v": 2, "slot": slot.as_dict()}
+    return {"ts": ts, "metadata": {"event_type": EVENT_TYPE, "event_payload": payload}}
 
 
 async def test_remind_does_nothing_once_picked() -> None:
@@ -270,3 +277,57 @@ async def test_find_suggestion_takes_the_newest_for_the_week_across_pages() -> N
     found = await find_suggestion(client, "C_PICKS", WEEK)
     assert found is not None and found["ts"] == "200.1"
     assert client.conversations_history.await_args_list[1].kwargs["cursor"] == "c2"
+
+
+# --- one suggestion per slot (SB-1640) ---------------------------------------------
+
+
+async def test_suggest_week_posts_one_message_per_slot_naming_it() -> None:
+    client = fake_slack()
+    writer, _ = writer_for("top-clash")
+    mt = FakeMt(result=fixtures.result("top-clash"))
+    outcomes = await suggest_week(WEEK, mt, writer, out(client))
+    assert list(outcomes) == list(SLOTS) and set(outcomes.values()) == {"posted"}
+    assert client.chat_postMessage.await_count == len(SLOTS)
+    assert [s for s in mt.slots if s is not None][::2] == list(SLOTS)  # pick check, candidates
+    posts = [c.kwargs for c in client.chat_postMessage.await_args_list]
+    assert [p["metadata"]["event_payload"]["slot"] for p in posts] == [s.as_dict() for s in SLOTS]
+    header = posts[4]["blocks"][0]["text"]["text"]
+    assert header.startswith("U16 Pro Pathway Match of the Week")
+
+
+async def test_a_picked_slot_gets_a_note_naming_the_slot() -> None:
+    client = fake_slack()
+    o = await suggest(
+        WEEK, FakeMt(pick=PICKED), scripted_writer()[0], out(client), slot=Slot("main", "U17")
+    )
+    assert o == "already_picked"
+    assert (
+        "U17, week of Nov 9 is already picked" in client.chat_postMessage.await_args.kwargs["text"]
+    )
+
+
+async def test_remind_finds_the_slot_s_own_post() -> None:
+    u16, u17 = Slot("main", "U16"), Slot("main", "U17")
+    client = fake_slack([suggestion("100.1", slot=u16), suggestion("200.1", slot=u17)])
+    outcome = await remind(WEEK, FakeMt(), scripted_writer()[0], out(client), ["U1"], slot=u16)
+    assert outcome == "reminded"
+    kwargs = client.chat_postMessage.await_args.kwargs
+    assert kwargs["thread_ts"] == "100.1" and "U16 Match of the Week" in kwargs["text"]
+
+
+async def test_remind_week_skips_picked_and_skipped_slots() -> None:
+    u15, u16 = Slot("main", "U15"), Slot("main", "U16")
+    client = fake_slack(
+        [suggestion("100.1", slot=u15, status="skipped"), suggestion("200.1", slot=u16)]
+    )
+    outcomes = await remind_week(
+        WEEK, FakeMt(), scripted_writer()[0], out(client), ["U1"], slots=(u15, u16)
+    )
+    assert outcomes == {u15: "skipped", u16: "reminded"}
+
+
+def test_overall_outcome() -> None:
+    assert overall(["posted", "error", "none"]) == "error"
+    assert overall(["already_picked", "posted"]) == "posted"
+    assert overall(["picked", "skipped"]) == "picked"

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import os
 from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from typing import Any, Protocol
 from zoneinfo import ZoneInfo
@@ -23,6 +24,55 @@ CLIENT_HEADER = "sb-agents"
 TOOL = "suggest_motw_candidates"
 # MT's MOTW pool is defined in Eastern time; so is "this week".
 TZ = ZoneInfo("America/New_York")
+
+
+@dataclass(frozen=True)
+class Slot:
+    """One Match of the Week a week: a pool and an age group (MT SB-1638)."""
+
+    pool: str  # "main" | "pathway"
+    age_group: str  # "U15", ...
+
+    @property
+    def label(self) -> str:
+        return f"{self.age_group} Pro Pathway" if self.pool == "pathway" else self.age_group
+
+    def as_dict(self) -> dict[str, str]:
+        return {"pool": self.pool, "age_group": self.age_group}
+
+    @classmethod
+    def parse(cls, value: str) -> Slot:
+        """`U16` (main pool) or `pathway:U16`."""
+        pool, _, age = value.rpartition(":")
+        return cls(pool or "main", age)
+
+
+# Main pool: Homegrown Northeast League + Flex Empire/Turnpike/New England.
+# Pathway: Northeast Pro Player Pathway, which has no U15.
+SLOTS: tuple[Slot, ...] = (
+    Slot("main", "U15"),
+    Slot("main", "U16"),
+    Slot("main", "U17"),
+    Slot("main", "U19"),
+    Slot("pathway", "U16"),
+    Slot("pathway", "U17"),
+    Slot("pathway", "U19"),
+)
+
+
+def slot_pick(body: dict[str, Any], slot: Slot | None) -> dict[str, Any] | None:
+    """The slot's pick from a `GET /api/motw` body.
+
+    An MT from before SB-1638 has no `picks`: its one `motw` was every slot's.
+    """
+    picks = body.get("picks")
+    if slot is None or picks is None:
+        return body.get("motw")
+    for p in picks:
+        age = p.get("age_group") or (p.get("match") or {}).get("age_group_name")
+        if (p.get("pool") or "main") == slot.pool and age == slot.age_group:
+            return p
+    return None
 
 
 class MtError(RuntimeError):
@@ -44,9 +94,11 @@ def parse_week(value: str | None, now: datetime | None = None) -> date:
 
 
 class MtReader(Protocol):
-    async def current_pick(self, week: date) -> dict[str, Any] | None: ...
+    async def current_pick(self, week: date, slot: Slot | None = None) -> dict[str, Any] | None: ...
 
-    async def candidates(self, week: date, limit: int = 5) -> CandidatesResult: ...
+    async def candidates(
+        self, week: date, limit: int = 5, slot: Slot | None = None
+    ) -> CandidatesResult: ...
 
 
 class LiveMt:
@@ -66,8 +118,8 @@ class LiveMt:
         self.http = http
         self.mcp_http_factory = mcp_http_factory  # tests: reach an in-process mt-mcp
 
-    async def current_pick(self, week: date) -> dict[str, Any] | None:
-        """The week's pick, or None. MT answers 200 with `motw: null` when unpicked."""
+    async def current_pick(self, week: date, slot: Slot | None = None) -> dict[str, Any] | None:
+        """The slot's pick for the week, or None. MT answers 200 with `motw: null` when unpicked."""
         url = f"{self.api_url}/api/motw"
         try:
             if self.http is not None:
@@ -76,11 +128,13 @@ class LiveMt:
                 async with httpx.AsyncClient(timeout=20) as http:
                     resp = await http.get(url, params={"week_start": week.isoformat()})
             resp.raise_for_status()
-            return resp.json().get("motw")
+            return slot_pick(resp.json(), slot)
         except (httpx.HTTPError, ValueError) as exc:
             raise MtError(f"GET /api/motw?week_start={week}: {exc}") from exc
 
-    async def candidates(self, week: date, limit: int = 5) -> CandidatesResult:
+    async def candidates(
+        self, week: date, limit: int = 5, slot: Slot | None = None
+    ) -> CandidatesResult:
         # Imported here: the mcp client stack is only needed for this call.
         from mcp import ClientSession
         from mcp.client.streamable_http import create_mcp_http_client, streamable_http_client
@@ -96,7 +150,10 @@ class LiveMt:
                 ClientSession(read, write) as session,
             ):
                 await session.initialize()
-                result = await session.call_tool(TOOL, {"week": week.isoformat(), "limit": limit})
+                args: dict[str, Any] = {"week": week.isoformat(), "limit": limit}
+                if slot is not None:
+                    args |= slot.as_dict()
+                result = await session.call_tool(TOOL, args)
         except Exception as exc:  # noqa: BLE001 - transport, auth, protocol: all "MT down"
             raise MtError(f"{TOOL}: {type(exc).__name__}: {exc}") from exc
         if result.is_error or not isinstance(result.structured_content, dict):

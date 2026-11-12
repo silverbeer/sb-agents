@@ -1,4 +1,6 @@
-"""`motw-agent suggest|remind [--week YYYY-MM-DD] [--dry-run]` (k3s CronJobs, or by hand).
+"""`motw-agent suggest|remind [--week YYYY-MM-DD] [--slot U16|pathway:U16] [--dry-run]`.
+
+k3s CronJobs, or by hand. Without --slot, every slot (one Slack message each, SB-1640).
 
     op run --env-file=.env.op --env-file=.env.mt.op -- uv run motw-agent suggest --dry-run
 
@@ -16,8 +18,8 @@ import os
 from sb_models import ModelConfigError, resolve
 
 from motw_agent.evals import evaluate_posted
-from motw_agent.mt import LiveMt, parse_week
-from motw_agent.run import Config, Out, remind, suggest
+from motw_agent.mt import SLOTS, LiveMt, Slot, parse_week
+from motw_agent.run import Config, Out, overall, remind_week, suggest_week
 from motw_agent.writer import build_writer
 from sb_obs import setup_telemetry
 
@@ -35,6 +37,11 @@ def _parser() -> argparse.ArgumentParser:
         s = sub.add_parser(name, help=help_)
         s.add_argument("--week", help="any YYYY-MM-DD in the week (default: this week, Eastern)")
         s.add_argument("--dry-run", action="store_true", help="print Slack messages, post none")
+        s.add_argument(
+            "--slot",
+            action="append",
+            help="only this slot: U16 (main pool) or pathway:U16; repeatable (default: all)",
+        )
     return p
 
 
@@ -50,10 +57,24 @@ async def _main(args: argparse.Namespace) -> int:
     out = Out(client, cfg.channel, dry_run=args.dry_run)
     writer = build_writer()
     evaluate = None if args.dry_run else evaluate_posted
+    slots = tuple(Slot.parse(v) for v in args.slot) if args.slot else SLOTS
     if args.command == "suggest":
-        outcome = await suggest(week, LiveMt(), writer, out, evaluate=evaluate)
+        outcomes: dict = await suggest_week(
+            week, LiveMt(), writer, out, slots=slots, evaluate=evaluate
+        )
     else:
-        outcome = await remind(week, LiveMt(), writer, out, cfg.approvers, evaluate=evaluate)
+        outcomes = await remind_week(
+            week, LiveMt(), writer, out, cfg.approvers, slots=slots, evaluate=evaluate
+        )
+    for slot, o in outcomes.items():
+        log.info(
+            "motw-agent %s %s: %s",
+            args.command,
+            slot.label,
+            o,
+            extra={"week": week.isoformat(), "slot": slot.as_dict()},
+        )
+    outcome = overall(list(outcomes.values()))
     log.info("motw-agent %s: %s", args.command, outcome, extra={"week": week.isoformat()})
     return 1 if outcome == "error" else 0
 
