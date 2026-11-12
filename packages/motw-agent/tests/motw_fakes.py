@@ -22,15 +22,18 @@ class FakeMt:
     ) -> None:
         self.pick, self.result = pick, result
         self.calls: list[tuple[str, date]] = []
+        self.slots: list[Any] = []
 
-    async def current_pick(self, week: date) -> dict[str, Any] | None:
+    async def current_pick(self, week: date, slot: Any = None) -> dict[str, Any] | None:
         self.calls.append(("current_pick", week))
+        self.slots.append(slot)
         if isinstance(self.pick, Exception):
             raise self.pick
         return self.pick
 
-    async def candidates(self, week: date, limit: int = 5) -> CandidatesResult:
+    async def candidates(self, week: date, limit: int = 5, slot: Any = None) -> CandidatesResult:
         self.calls.append(("candidates", week))
+        self.slots.append(slot)
         if isinstance(self.result, Exception):
             raise self.result
         assert self.result is not None

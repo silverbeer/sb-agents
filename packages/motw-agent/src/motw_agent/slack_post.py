@@ -5,7 +5,8 @@ it back instead of keeping state. Change it in both places (and bump `v`):
 
     metadata.event_type = "motw_suggestion"
     metadata.event_payload = {
-      "v": 1, "week_start": "YYYY-MM-DD", "status": "open" | "picked" | "skipped",
+      "v": 2, "week_start": "YYYY-MM-DD", "status": "open" | "picked" | "skipped",
+      "slot": {"pool": "main" | "pathway", "age_group": "U16"},   # v2 (SB-1640)
       "candidates": [{"n": 1, "match_id": 4096, "label": "A vs B", "table": "U15 ...",
                       "blurb": "...", "reasons": [{"text": "...", "kind": "standings"}]}],
     }
@@ -21,11 +22,11 @@ from datetime import date, datetime, time
 from typing import Any
 
 from motw_agent.candidates import CandidatesResult, MotwCandidate
-from motw_agent.mt import TZ
+from motw_agent.mt import TZ, Slot
 from motw_agent.writer import Draft, Written
 
 EVENT_TYPE = "motw_suggestion"
-CONTRACT_VERSION = 1
+CONTRACT_VERSION = 2  # v2: one message per slot, payload names it (SB-1640)
 TOP_N = 3
 
 FLAG_LABELS = {
@@ -111,13 +112,16 @@ def actions_block(count: int) -> dict[str, Any]:
     return {"type": "actions", "block_id": "motw_actions", "elements": buttons}
 
 
-def metadata(week: date, picks: list[tuple[MotwCandidate, Draft]]) -> dict[str, Any]:
+def metadata(
+    week: date, picks: list[tuple[MotwCandidate, Draft]], slot: Slot | None = None
+) -> dict[str, Any]:
     return {
         "event_type": EVENT_TYPE,
         "event_payload": {
             "v": CONTRACT_VERSION,
             "week_start": week.isoformat(),
             "status": "open",
+            **({"slot": slot.as_dict()} if slot else {}),
             "candidates": [
                 {
                     "n": n,
@@ -133,8 +137,15 @@ def metadata(week: date, picks: list[tuple[MotwCandidate, Draft]]) -> dict[str, 
     }
 
 
+def slot_title(slot: Slot | None) -> str:
+    return f"{slot.label} Match of the Week" if slot else "Match of the Week"
+
+
 def suggestion_message(
-    week: date, result: CandidatesResult, written: list[tuple[MotwCandidate, Written]]
+    week: date,
+    result: CandidatesResult,
+    written: list[tuple[MotwCandidate, Written]],
+    slot: Slot | None = None,
 ) -> dict[str, Any]:
     """kwargs for chat.postMessage (without `channel`)."""
     blocks: list[dict[str, Any]] = [
@@ -142,7 +153,7 @@ def suggestion_message(
             "type": "header",
             "text": {
                 "type": "plain_text",
-                "text": f"Match of the Week: week of {week_label(week)}",
+                "text": f"{slot_title(slot)}: week of {week_label(week)}",
             },
         }
     ]
@@ -166,13 +177,14 @@ def suggestion_message(
         blocks += candidate_blocks(n, c, w)
     blocks.append(actions_block(len(written)))
     blocks.append({"type": "context", "elements": [{"type": "mrkdwn", "text": REPLY_HELP}]})
-    text = f"MOTW candidates for the week of {week_label(week)}: " + "; ".join(
+    who = f"{slot.label} " if slot else ""
+    text = f"{who}MOTW candidates for the week of {week_label(week)}: " + "; ".join(
         f"#{n} {c.label}" for n, (c, _) in enumerate(written, 1)
     )
     return {
         "text": text,
         "blocks": blocks,
-        "metadata": metadata(week, [(c, w.draft) for c, w in written]),
+        "metadata": metadata(week, [(c, w.draft) for c, w in written], slot),
     }
 
 
@@ -185,8 +197,17 @@ def week_oldest_ts(week: date) -> str:
     return f"{datetime.combine(week, time(), tzinfo=TZ).timestamp():.6f}"
 
 
-async def find_suggestion(client: Any, channel: str, week: date) -> dict[str, Any] | None:
-    """This week's suggestion message (newest), found by its metadata."""
+def _slot_of(payload: dict[str, Any]) -> Slot | None:
+    raw = payload.get("slot") or {}
+    return Slot(raw["pool"], raw["age_group"]) if raw.get("pool") and raw.get("age_group") else None
+
+
+async def find_suggestion(
+    client: Any, channel: str, week: date, slot: Slot | None = None
+) -> dict[str, Any] | None:
+    """This week's suggestion message for the slot (newest), found by its metadata.
+
+    With no slot, a message from before SB-1640 (one for the whole week)."""
     cursor = None
     found: list[dict[str, Any]] = []
     for _ in range(5):  # 5 x 200 messages: far more than a picks channel sees in a week
@@ -203,6 +224,7 @@ async def find_suggestion(client: Any, channel: str, week: date) -> dict[str, An
             if (
                 meta.get("event_type") == EVENT_TYPE
                 and payload.get("week_start") == week.isoformat()
+                and _slot_of(payload) == slot
             ):
                 found.append(msg)
         cursor = (resp.get("response_metadata") or {}).get("next_cursor")

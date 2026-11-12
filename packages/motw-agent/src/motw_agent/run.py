@@ -1,7 +1,10 @@
 """The two scheduled runs: Tuesday's suggestion and Thursday's reminder (SB-1545).
 
-    suggest: week picked? note + stop. Else candidates → top 3 → drafts → post.
-    remind:  week picked? nothing. Tuesday's post missing? post fresh suggestions.
+One Match of the Week per slot (pool + age group, SB-1640), so each run goes slot by
+slot, one Slack message per slot:
+
+    suggest: slot picked? note + stop. Else candidates → top 3 → drafts → post.
+    remind:  slot picked? nothing. Tuesday's post missing? post fresh suggestions.
              skipped? nothing. Else reply in its thread, @mentioning the approvers.
 
 Never writes to MT. The pick itself is made by an approver in Slack and written by
@@ -23,7 +26,7 @@ from typing import Any, Literal
 from pydantic_ai import Agent
 
 from motw_agent.candidates import MotwCandidate
-from motw_agent.mt import MtError, MtReader
+from motw_agent.mt import SLOTS, MtError, MtReader, Slot
 from motw_agent.slack_post import (
     TOP_N,
     find_suggestion,
@@ -78,10 +81,10 @@ class Out:
         response = await self.client.chat_postMessage(channel=self.channel, **kwargs)
         return response["ts"]
 
-    async def find_suggestion(self, week: date) -> dict[str, Any] | None:
+    async def find_suggestion(self, week: date, slot: Slot | None = None) -> dict[str, Any] | None:
         if self.client is None:
             return None
-        return await find_suggestion(self.client, self.channel, week)
+        return await find_suggestion(self.client, self.channel, week, slot)
 
 
 def _pick_label(pick: dict[str, Any]) -> str:
@@ -120,43 +123,43 @@ async def suggest(
     *,
     caller: str = "cron",
     evaluate: PostedEval | None = None,
+    slot: Slot | None = None,
 ) -> SuggestOutcome:
     label = week_label(week)
+    if slot is not None:
+        label = f"{slot.label}, week of {label}"
+    else:
+        label = f"the week of {label}"
     try:
-        pick = await mt.current_pick(week)
+        pick = await mt.current_pick(week, slot)
     except MtError:
         log.exception("reading the week's pick failed")
-        await out.post(**note_message(f"MOTW: couldn't check the week of {label}. It's logged."))
+        await out.post(**note_message(f"MOTW: couldn't check {label}. It's logged."))
         return "error"
     if pick:
         await out.post(
             **note_message(
-                f"MOTW: the week of {label} is already picked ({_pick_label(pick)}). "
-                "Leaving it alone."
+                f"MOTW: {label} is already picked ({_pick_label(pick)}). Leaving it alone."
             )
         )
         return "already_picked"
 
     try:
-        result = await mt.candidates(week)
+        result = await mt.candidates(week, slot=slot)
     except MtError:
         log.exception("suggest_motw_candidates failed")
         result = None
     if result is None or result.error is not None or result.candidates is None:
         if result is not None and result.error is not None:
             log.error("suggest_motw_candidates error: %s", result.error.model_dump())
-        await out.post(
-            **note_message(f"MOTW: couldn't get candidates for the week of {label}. It's logged.")
-        )
+        await out.post(**note_message(f"MOTW: couldn't get candidates for {label}. It's logged."))
         return "error"
     if result.current_pick is not None:  # picked between the two reads
-        await out.post(
-            **note_message(f"MOTW: the week of {label} is already picked. Leaving it alone.")
-        )
+        await out.post(**note_message(f"MOTW: {label} is already picked. Leaving it alone."))
         return "already_picked"
     if not result.candidates:
         why = f" ({result.reason})" if result.reason else ""
-        await out.post(**note_message(f"MOTW: no eligible fixtures for the week of {label}{why}."))
+        await out.post(**note_message(f"MOTW: no eligible fixtures for {label}{why}."))
         return "none"
 
     top = result.candidates[:TOP_N]
@@ -169,7 +172,7 @@ async def suggest(
                 log.warning("draft fell back to plain facts: %s", w.problems)
         run.confidence = "low" if any(w.fallback for w in written) else "high"
     posted = list(zip(top, written, strict=True))
-    ts = await out.post(**suggestion_message(week, result, posted))
+    ts = await out.post(**suggestion_message(week, result, posted, slot))
     if evaluate is not None and ts is not None:
         await _report_eval(evaluate, posted, model_name(writer.model), out, ts)
     return "posted"
@@ -183,27 +186,71 @@ async def remind(
     approvers: list[str],
     *,
     evaluate: PostedEval | None = None,
+    slot: Slot | None = None,
 ) -> RemindOutcome:
     try:
-        pick = await mt.current_pick(week)
+        pick = await mt.current_pick(week, slot)
     except MtError:
         log.exception("reading the week's pick failed; not reminding")
         return "error"
     if pick:
         return "picked"
-    post = await out.find_suggestion(week)
+    post = await out.find_suggestion(week, slot)
     if post is None:
-        log.warning("no suggestion found for %s; posting fresh suggestions", week)
-        return await suggest(week, mt, writer, out, caller="cron-remind", evaluate=evaluate)
+        log.warning("no suggestion found for %s %s; posting fresh suggestions", week, slot)
+        return await suggest(
+            week, mt, writer, out, caller="cron-remind", evaluate=evaluate, slot=slot
+        )
     payload = (post.get("metadata") or {}).get("event_payload") or {}
     if payload.get("status") == "skipped":
         return "skipped"
     who = " ".join(f"<@{a}>" for a in approvers)
+    what = f"{slot.label} Match of the Week" if slot else "Match of the Week"
     await out.post(
         thread_ts=post["ts"],
         text=(
-            f"{who} Reminder: no Match of the Week picked for the week of {week_label(week)} yet. "
+            f"{who} Reminder: no {what} picked for the week of {week_label(week)} yet. "
             "Use the buttons above, or reply `pick N` here."
         ).strip(),
     )
     return "reminded"
+
+
+def overall(outcomes: list[str]) -> str:
+    """One outcome for a run over several slots: any error is an error (the Job fails)."""
+    for o in ("error", "posted", "reminded"):
+        if o in outcomes:
+            return o
+    return outcomes[0] if outcomes else "none"
+
+
+async def suggest_week(
+    week: date,
+    mt: MtReader,
+    writer: Agent[MotwCandidate, Draft],
+    out: Out,
+    *,
+    slots: tuple[Slot, ...] = SLOTS,
+    evaluate: PostedEval | None = None,
+) -> dict[Slot, SuggestOutcome]:
+    """Tuesday: one suggestion per slot, in order. A failed slot does not stop the rest."""
+    return {
+        slot: await suggest(week, mt, writer, out, evaluate=evaluate, slot=slot) for slot in slots
+    }
+
+
+async def remind_week(
+    week: date,
+    mt: MtReader,
+    writer: Agent[MotwCandidate, Draft],
+    out: Out,
+    approvers: list[str],
+    *,
+    slots: tuple[Slot, ...] = SLOTS,
+    evaluate: PostedEval | None = None,
+) -> dict[Slot, RemindOutcome]:
+    """Thursday: nudge each slot that is still unpicked and not skipped."""
+    return {
+        slot: await remind(week, mt, writer, out, approvers, evaluate=evaluate, slot=slot)
+        for slot in slots
+    }

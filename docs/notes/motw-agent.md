@@ -1,19 +1,22 @@
 # motw-agent: weekly Match of the Week suggestions (SB-1545) and Slack approval (SB-1546)
 
-MissingTable features one Match of the Week (MOTW). Picking it is a human decision; the
-legwork isn't. motw-agent does the legwork on a schedule and posts a ready-to-approve
+MissingTable features one Match of the Week (MOTW) per **slot**: a pool and an age
+group (MT SB-1638). Pool `main` (Homegrown Northeast League + Flex Empire/Turnpike/New
+England) runs U15, U16, U17, U19; pool `pathway` (Northeast Pro Player Pathway) runs U16,
+U17, U19. Seven picks a week, one Slack message each (SB-1640). Picking is a human
+decision; the legwork isn't. motw-agent does the legwork on a schedule and posts a ready-to-approve
 suggestion to the private Slack channel **#mt-admin-picks**. An approver picks with one
 click (or a thread reply), and sb-support writes the pick to MT (SB-1546).
 
 ```
-k3s CronJob (Tue 10:00 ET) ─► motw-agent suggest
-  1. GET  /api/motw?week_start=<Mon>            picked already? note "leaving it alone", stop
-  2. mt-mcp suggest_motw_candidates(week)        ranked fixtures + facts with ids (MT SB-1551)
+k3s CronJob (Tue 10:00 ET) ─► motw-agent suggest            for each of the 7 slots:
+  1. GET  /api/motw?week_start=<Mon>            slot picked already? note "leaving it alone", next
+  2. mt-mcp suggest_motw_candidates(week, pool, age_group)   ranked fixtures + fact ids
   3. writer (PydanticAI, Haiku) × top 3          blurb + 3-5 reasons, each citing fact ids;
                                                  output validator rejects anything ungrounded
   4. chat.postMessage #mt-admin-picks            blocks + buttons + metadata (the candidates)
 
-k3s CronJob (Thu 18:00 ET) ─► motw-agent remind
+k3s CronJob (Thu 18:00 ET) ─► motw-agent remind             for each of the 7 slots:
   picked → nothing · Tuesday's post skipped → nothing
   unpicked → thread reply on Tuesday's post, @mentioning MOTW_APPROVERS
   Tuesday's post missing (run failed) → post fresh suggestions
@@ -27,11 +30,11 @@ motw-agent **never writes to MT**. It reads with mt-agent's public read-only acc
 | Module | What |
 |---|---|
 | `candidates.py` | pydantic models of `suggest_motw_candidates`' result; lenient (unknown fields ignored) |
-| `mt.py` | `LiveMt`: REST `current_pick(week)`, mt-mcp `candidates(week)`; Eastern-time weeks (Mon-Sun) |
+| `mt.py` | `Slot`, `SLOTS`; `LiveMt`: REST `current_pick(week, slot)`, mt-mcp `candidates(week, slot=)`; Eastern-time weeks (Mon-Sun) |
 | `writer.py` | the PydanticAI writer, `check_draft` (the validator), `fallback_draft` |
 | `slack_post.py` | Block Kit, the metadata contract, `find_suggestion` (history + metadata) |
-| `run.py` | `suggest` / `remind`: the two runs, one RunRecord per `suggest` |
-| `cli.py` | `motw-agent suggest|remind [--week YYYY-MM-DD] [--dry-run]` |
+| `run.py` | `suggest` / `remind` for one slot; `suggest_week` / `remind_week` over all slots |
+| `cli.py` | `motw-agent suggest|remind [--week YYYY-MM-DD] [--slot U16\|pathway:U16]... [--dry-run]` |
 | `fixtures.py`, `evals.py` | bait fixtures; `motw-agent-eval` (real model, not CI) |
 
 ## The writer: model writes, code decides
@@ -107,14 +110,17 @@ Message metadata carries what approval needs, so sb-support keeps no state:
 
 ```json
 {"event_type": "motw_suggestion",
- "event_payload": {"v": 1, "week_start": "2026-11-09", "status": "open",
+ "event_payload": {"v": 2, "week_start": "2026-11-09", "status": "open",
+   "slot": {"pool": "main", "age_group": "U16"},
    "candidates": [{"n": 1, "match_id": 4096, "label": "IFA vs NEFC",
                    "table": "U15 Homegrown Northeast", "blurb": "...",
                    "reasons": [{"text": "...", "kind": "standings"}]}]}}
 ```
 
 `status` becomes `picked` or `skipped` when sb-support updates the message; Thursday's
-reminder skips a `skipped` week. Change the contract in both packages and bump `v`.
+reminder skips a `skipped` slot. Change the contract in both packages and bump `v`.
+v2 (SB-1640) added `slot`; sb-support still reads v1 (a whole-week suggestion) and checks
+only the slot's own pick before writing (`GET /api/motw` → `picks`).
 Reading it back needs `conversations.history` with `include_all_metadata=true`.
 
 ## Running it
@@ -122,6 +128,7 @@ Reading it back needs `conversations.history` with `include_all_metadata=true`.
 ```bash
 op run --env-file=.env.op --env-file=.env.mt.op -- uv run motw-agent suggest --dry-run
 op run --env-file=.env.op --env-file=.env.mt.op -- uv run motw-agent suggest --week 2026-11-12 --dry-run
+op run --env-file=.env.op --env-file=.env.mt.op -- uv run motw-agent suggest --slot pathway:U16 --dry-run
 ```
 
 `--dry-run` prints the `chat.postMessage` arguments (blocks + metadata) instead of

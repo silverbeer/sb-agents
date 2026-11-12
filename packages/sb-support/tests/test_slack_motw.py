@@ -117,9 +117,11 @@ class FakeApi:
         self.existing, self.fail = existing, fail
         self.writes: list[Candidate] = []
         self.checks: list[str] = []
+        self.slots: list[dict | None] = []
 
-    async def current_pick(self, week_start: str) -> dict | None:
+    async def current_pick(self, week_start: str, slot: dict | None = None) -> dict | None:
         self.checks.append(week_start)
+        self.slots.append(slot)
         if self.fail == "check":
             raise MotwApiError("GET /api/motw: HTTP 502")
         return self.existing
